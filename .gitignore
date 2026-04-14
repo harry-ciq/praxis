@@ -1,0 +1,30 @@
+# Dependencies
+web/node_modules/
+
+# Build output
+server/bin/
+web/.next/
+web/out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+web/coverage/
+web/playwright-report/
+web/test-results/
+
+# Generated
+server/internal/repository/db/

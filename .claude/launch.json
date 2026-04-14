@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Next.js Frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "web", "run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "Go API Server",
+      "runtimeExecutable": "make",
+      "runtimeArgs": ["dev-server"],
+      "port": 8080
+    },
+    {
+      "name": "Go Asynq Worker",
+      "runtimeExecutable": "make",
+      "runtimeArgs": ["dev-worker"],
+      "port": null
+    },
+    {
+      "name": "Docker Infra",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "-d"],
+      "port": null
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS job_applications;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS companies;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS conversation_participants;
+DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS reactions;
+DROP TABLE IF EXISTS follows;
+DROP TABLE IF EXISTS achievements;
+DROP TABLE IF EXISTS connected_providers;
+DROP TABLE IF EXISTS auth_accounts;
+DROP TABLE IF EXISTS users;
+DROP EXTENSION IF EXISTS "uuid-ossp";
