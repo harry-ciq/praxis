@@ -90,6 +90,8 @@ func main() {
 	messageRepo := repository.NewMessageRepo(pool)
 	jobRepo := repository.NewJobRepo(pool)
 	notificationRepo := repository.NewNotificationRepo(pool)
+	experienceRepo := repository.NewExperienceRepo(pool)
+	skillRepo := repository.NewSkillRepo(pool)
 
 	// Provider registry
 	providerRegistry := provider.NewRegistry()
@@ -101,8 +103,8 @@ func main() {
 
 	// Services
 	authService := service.NewAuthService(userRepo, rdb, cfg)
-	achievementService := service.NewAchievementService(achievementRepo, providerRepo, userRepo, providerRegistry, logger)
-	userService := service.NewUserService(userRepo, followRepo, achievementRepo, providerRepo)
+	achievementService := service.NewAchievementService(achievementRepo, providerRepo, userRepo, skillRepo, providerRegistry, logger)
+	userService := service.NewUserService(userRepo, followRepo, achievementRepo, providerRepo, experienceRepo, skillRepo)
 	messageService := service.NewMessageService(messageRepo, userRepo, hub, logger)
 	jobService := service.NewJobService(jobRepo, achievementRepo, logger)
 	notificationService := service.NewNotificationService(notificationRepo, hub, logger)
@@ -111,7 +113,7 @@ func main() {
 	authHandler := handler.NewAuthHandler(authService, userRepo)
 	achievementHandler := handler.NewAchievementHandler(achievementService)
 	feedHandler := handler.NewFeedHandler(achievementService)
-	userHandler := handler.NewUserHandler(userService)
+	userHandler := handler.NewUserHandler(userService, achievementService, experienceRepo, skillRepo)
 	messageHandler := handler.NewMessageHandler(messageService)
 	jobHandler := handler.NewJobHandler(jobService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
@@ -140,6 +142,9 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.TryAuthMiddleware(authService))
 			r.Get("/users/{username}", userHandler.GetProfile)
+			r.Get("/users/{username}/achievements", userHandler.GetUserAchievements)
+			r.Get("/users/{username}/followers", userHandler.ListFollowers)
+			r.Get("/users/{username}/following", userHandler.ListFollowing)
 		})
 
 		// Job routes (public listing and detail)
@@ -155,6 +160,11 @@ func main() {
 
 			// User routes
 			r.Patch("/users/me", userHandler.UpdateProfile)
+			r.Post("/users/me/experiences", userHandler.CreateExperience)
+			r.Patch("/users/me/experiences/{id}", userHandler.UpdateExperience)
+			r.Delete("/users/me/experiences/{id}", userHandler.DeleteExperience)
+			r.Post("/users/me/skills", userHandler.CreateSkill)
+			r.Delete("/users/me/skills/{id}", userHandler.DeleteSkill)
 			r.Post("/users/{username}/follow", userHandler.Follow)
 			r.Delete("/users/{username}/follow", userHandler.Unfollow)
 

@@ -9,9 +9,10 @@
     },
     {
       "name": "Go API Server",
-      "runtimeExecutable": "make",
-      "runtimeArgs": ["dev-server"],
-      "port": 8080
+      "runtimeExecutable": "/Users/harry/go/bin/air",
+      "runtimeArgs": [],
+      "port": 8080,
+      "cwd": "server"
     },
     {
       "name": "Go Asynq Worker",

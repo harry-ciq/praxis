@@ -45,7 +45,7 @@ func withAuth(r *http.Request, userID, username string) *http.Request {
 // --- GetProfile handler tests ---
 
 func TestGetProfile_MissingUsername(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	req := httptest.NewRequest("GET", "/api/v1/users/", nil)
 	req = withChiURLParam(req, "username", "")
@@ -62,7 +62,7 @@ func TestGetProfile_MissingUsername(t *testing.T) {
 // --- UpdateProfile handler tests ---
 
 func TestUpdateProfile_Unauthenticated(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	body := bytes.NewBufferString(`{"name":"New Name"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/users/me", body)
@@ -74,7 +74,7 @@ func TestUpdateProfile_Unauthenticated(t *testing.T) {
 }
 
 func TestUpdateProfile_InvalidBody(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	body := bytes.NewBufferString(`not json`)
 	req := httptest.NewRequest("PATCH", "/api/v1/users/me", body)
@@ -88,7 +88,7 @@ func TestUpdateProfile_InvalidBody(t *testing.T) {
 }
 
 func TestUpdateProfile_EmptyUpdate(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	body := bytes.NewBufferString(`{}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/users/me", body)
@@ -107,7 +107,7 @@ func TestUpdateProfile_EmptyUpdate(t *testing.T) {
 // --- Follow handler tests ---
 
 func TestFollow_Unauthenticated(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/v1/users/someone/follow", nil)
 	req = withChiURLParam(req, "username", "someone")
@@ -119,7 +119,7 @@ func TestFollow_Unauthenticated(t *testing.T) {
 }
 
 func TestFollow_MissingUsername(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	req := httptest.NewRequest("POST", "/api/v1/users//follow", nil)
 	req = withAuth(req, "user-123", "testuser")
@@ -138,7 +138,7 @@ func TestFollow_MissingUsername(t *testing.T) {
 // --- Unfollow handler tests ---
 
 func TestUnfollow_Unauthenticated(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/users/someone/follow", nil)
 	req = withChiURLParam(req, "username", "someone")
@@ -150,7 +150,7 @@ func TestUnfollow_Unauthenticated(t *testing.T) {
 }
 
 func TestUnfollow_MissingUsername(t *testing.T) {
-	h := NewUserHandler(nil)
+	h := NewUserHandler(nil, nil, nil, nil)
 
 	req := httptest.NewRequest("DELETE", "/api/v1/users//follow", nil)
 	req = withAuth(req, "user-123", "testuser")

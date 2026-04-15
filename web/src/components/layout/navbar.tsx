@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuLabel,
+  DropdownMenuGroup,
 } from "@/components/ui/dropdown-menu";
 import { Bell, Search, LogOut, User, Settings } from "lucide-react";
 import Link from "next/link";
@@ -80,16 +81,18 @@ export function Navbar() {
             </Avatar>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side="bottom" sideOffset={8}>
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col gap-0.5">
-                <p className="text-sm font-medium text-zinc-100">
-                  {user?.name}
-                </p>
-                <p className="text-xs text-zinc-400">@{user?.username}</p>
-              </div>
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-sm font-medium text-zinc-100">
+                    {user?.name}
+                  </p>
+                  <p className="text-xs text-zinc-400">@{user?.username}</p>
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem render={<Link href="/profile" />}>
+            <DropdownMenuItem render={<Link href={`/profile/${user?.username ?? ""}`} />}>
               <User className="mr-1.5 size-4" />
               Profile
             </DropdownMenuItem>

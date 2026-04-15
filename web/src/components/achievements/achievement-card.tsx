@@ -233,7 +233,7 @@ export function AchievementCard({ achievement }: AchievementCardProps) {
         )}
 
         {/* Repo breakdown for weekly commits */}
-        {type === "WEEKLY_COMMITS" && metadata?.repos && (
+        {type === "WEEKLY_COMMITS" && Array.isArray(metadata?.repos) && (
           <div className="mb-3 ml-[52px] space-y-1">
             {(
               metadata.repos as {

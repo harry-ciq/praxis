@@ -44,7 +44,7 @@ func (r *FollowRepo) IsFollowing(ctx context.Context, followerID, followingID st
 
 func (r *FollowRepo) ListFollowers(ctx context.Context, userID string, limit, offset int) ([]User, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT u.id, u.username, u.email, u.name, u.bio, u.avatar_url, u.headline, u.created_at, u.updated_at
+		`SELECT u.id, u.username, u.email, u.name, u.bio, u.avatar_url, u.headline, u.location, u.website_url, u.social_links, u.created_at, u.updated_at
 		 FROM follows f
 		 JOIN users u ON u.id = f.follower_id
 		 WHERE f.following_id = $1
@@ -62,7 +62,7 @@ func (r *FollowRepo) ListFollowers(ctx context.Context, userID string, limit, of
 
 func (r *FollowRepo) ListFollowing(ctx context.Context, userID string, limit, offset int) ([]User, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT u.id, u.username, u.email, u.name, u.bio, u.avatar_url, u.headline, u.created_at, u.updated_at
+		`SELECT u.id, u.username, u.email, u.name, u.bio, u.avatar_url, u.headline, u.location, u.website_url, u.social_links, u.created_at, u.updated_at
 		 FROM follows f
 		 JOIN users u ON u.id = f.following_id
 		 WHERE f.follower_id = $1
@@ -92,7 +92,7 @@ func scanUsers(rows pgx.Rows) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.Bio, &u.AvatarURL, &u.Headline, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.Bio, &u.AvatarURL, &u.Headline, &u.Location, &u.WebsiteURL, &u.SocialLinks, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

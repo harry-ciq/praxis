@@ -3,6 +3,7 @@ web/node_modules/
 
 # Build output
 server/bin/
+server/tmp/
 web/.next/
 web/out/
 

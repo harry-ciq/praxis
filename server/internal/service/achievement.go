@@ -16,6 +16,7 @@ type AchievementService struct {
 	achievementRepo *repository.AchievementRepo
 	providerRepo    *repository.ProviderRepo
 	userRepo        *repository.UserRepo
+	skillRepo       *repository.SkillRepo
 	registry        *provider.Registry
 	logger          *zap.Logger
 }
@@ -24,6 +25,7 @@ func NewAchievementService(
 	achievementRepo *repository.AchievementRepo,
 	providerRepo *repository.ProviderRepo,
 	userRepo *repository.UserRepo,
+	skillRepo *repository.SkillRepo,
 	registry *provider.Registry,
 	logger *zap.Logger,
 ) *AchievementService {
@@ -31,6 +33,7 @@ func NewAchievementService(
 		achievementRepo: achievementRepo,
 		providerRepo:    providerRepo,
 		userRepo:        userRepo,
+		skillRepo:       skillRepo,
 		registry:        registry,
 		logger:          logger,
 	}
@@ -171,6 +174,29 @@ func (s *AchievementService) SyncProvider(ctx context.Context, userID, providerN
 		newCount++
 	}
 
+	// Extract unique languages from REPO_CREATED achievements and upsert as verified skills
+	if s.skillRepo != nil {
+		languages := s.extractLanguagesFromAchievements(ctx, userID)
+		if len(languages) > 0 {
+			var skillInputs []repository.SkillInput
+			for _, lang := range languages {
+				skillInputs = append(skillInputs, repository.SkillInput{
+					Name:     lang,
+					Verified: true,
+					Source:   strings.ToLower(providerName),
+				})
+			}
+			if err := s.skillRepo.BulkUpsert(ctx, userID, skillInputs); err != nil {
+				s.logger.Warn("failed to upsert skills from provider", zap.Error(err))
+			} else {
+				s.logger.Info("upserted skills from provider",
+					zap.String("userId", userID),
+					zap.Int("count", len(skillInputs)),
+				)
+			}
+		}
+	}
+
 	// Update sync status to IDLE
 	if err := s.providerRepo.UpdateSyncStatus(ctx, userID, providerName, "IDLE"); err != nil {
 		s.logger.Warn("failed to update sync status", zap.Error(err))
@@ -272,4 +298,36 @@ func (s *AchievementService) ToggleReaction(ctx context.Context, userID, achieve
 
 	// Add or replace reaction
 	return s.achievementRepo.CreateReaction(ctx, userID, achievementID, reactionType)
+}
+
+// extractLanguagesFromAchievements looks at all REPO_CREATED achievements for the user
+// and extracts unique programming languages from their metadata.
+func (s *AchievementService) extractLanguagesFromAchievements(ctx context.Context, userID string) []string {
+	// Fetch all achievements for the user to find REPO_CREATED ones with language metadata
+	achievements, err := s.achievementRepo.ListByUserID(ctx, userID, 1000, 0)
+	if err != nil {
+		s.logger.Warn("failed to list achievements for language extraction", zap.Error(err))
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var languages []string
+	for _, a := range achievements {
+		if a.Type != "REPO_CREATED" {
+			continue
+		}
+		var meta map[string]interface{}
+		if err := json.Unmarshal(a.Metadata, &meta); err != nil {
+			continue
+		}
+		lang, ok := meta["language"].(string)
+		if !ok || lang == "" {
+			continue
+		}
+		if !seen[lang] {
+			seen[lang] = true
+			languages = append(languages, lang)
+		}
+	}
+	return languages
 }

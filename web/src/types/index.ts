@@ -26,10 +26,56 @@ export interface UserProfile {
   bio: string | null;
   avatarUrl: string | null;
   headline: string | null;
+  location: string | null;
+  websiteUrl: string | null;
+  socialLinks: Record<string, string>;
   createdAt: string;
   achievementCount: number;
   followerCount: number;
   followingCount: number;
+  isFollowing: boolean;
+  experiences: Experience[];
+  skills: Skill[];
+  providers: ConnectedProvider[];
+}
+
+export interface Experience {
+  id: string;
+  userId: string;
+  companyName: string;
+  role: string;
+  startDate: string;
+  endDate: string | null;
+  description: string | null;
+  isCurrent: boolean;
+  createdAt: string;
+}
+
+export interface Skill {
+  id: string;
+  userId: string;
+  name: string;
+  verified: boolean;
+  source: string;
+  createdAt: string;
+}
+
+export interface ConnectedProvider {
+  id: string;
+  userId: string;
+  provider: string;
+  providerUsername: string;
+  lastSyncedAt: string | null;
+  syncStatus: string;
+  createdAt: string;
+}
+
+export interface UserSummary {
+  id: string;
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+  headline: string | null;
   isFollowing: boolean;
 }
 

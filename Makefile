@@ -4,9 +4,9 @@
 dev-infra:
 	docker compose up -d
 
-# Start Go API server
+# Start Go API server (with hot reload via Air)
 dev-server:
-	cd server && go run ./cmd/api
+	cd server && $(HOME)/go/bin/air
 
 # Start Go worker
 dev-worker:
@@ -26,7 +26,7 @@ dev: dev-infra
 	@echo "✅ Migrations applied"
 	@echo "🚀 Starting Go API server (port 8080), Go worker, and Next.js (port 3000)..."
 	@trap 'kill 0' INT TERM EXIT; \
-		(cd server && go run ./cmd/api 2>&1 | sed 's/^/[api]    /') & \
+		(cd server && $(HOME)/go/bin/air 2>&1 | sed 's/^/[api]    /') & \
 		(cd server && go run ./cmd/worker 2>&1 | sed 's/^/[worker] /') & \
 		(cd web && npm run dev 2>&1 | sed 's/^/[web]    /') & \
 		wait

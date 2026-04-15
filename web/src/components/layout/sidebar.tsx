@@ -11,18 +11,24 @@ import {
   Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 
-const navItems = [
+const staticNavItems = [
   { href: "/feed", label: "Feed", icon: LayoutDashboard },
   { href: "/messages", label: "Messages", icon: MessageSquare },
   { href: "/jobs", label: "Jobs", icon: Briefcase },
   { href: "/notifications", label: "Notifications", icon: Bell },
-  { href: "/profile", label: "Profile", icon: User },
-  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const navItems = [
+    ...staticNavItems,
+    { href: `/profile/${user?.username ?? ""}`, label: "Profile", icon: User },
+    { href: "/settings", label: "Settings", icon: Settings },
+  ];
 
   return (
     <>
