@@ -150,17 +150,18 @@ func (r *AchievementRepo) ListByUserID(ctx context.Context, userID string, limit
 }
 
 func (r *AchievementRepo) ListFeed(ctx context.Context, userID string, limit, offset int) ([]AchievementWithUser, error) {
-	// Feed shows all achievements, ordered by most recent.
-	// The userID parameter is reserved for future use (e.g., showing only followed users).
+	// Feed shows achievements from the user themselves + users they follow.
 	rows, err := r.pool.Query(ctx,
 		`SELECT a.id, a.user_id, a.type, a.title, a.description, a.metadata, a.proof_url, a.proof_data,
 		        a.source, a.source_id, a.verification_hash, a.status, a.created_at,
 		        u.username, u.name, u.avatar_url
 		 FROM achievements a
 		 JOIN users u ON u.id = a.user_id
+		 WHERE a.user_id = $1
+		    OR a.user_id IN (SELECT following_id FROM follows WHERE follower_id = $1)
 		 ORDER BY a.created_at DESC
-		 LIMIT $1 OFFSET $2`,
-		limit, offset,
+		 LIMIT $2 OFFSET $3`,
+		userID, limit, offset,
 	)
 	if err != nil {
 		return nil, err
