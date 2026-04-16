@@ -239,6 +239,29 @@ func (r *MessageRepo) FindDirectConversation(ctx context.Context, userID1, userI
 	return conversationID, nil
 }
 
+func (r *MessageRepo) DeleteMessage(ctx context.Context, messageID, senderID string) error {
+	result, err := r.pool.Exec(ctx,
+		`DELETE FROM messages WHERE id = $1 AND sender_id = $2`,
+		messageID, senderID,
+	)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+func (r *MessageRepo) DeleteConversation(ctx context.Context, conversationID string) error {
+	// Messages are cascade-deleted via FK
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM conversations WHERE id = $1`,
+		conversationID,
+	)
+	return err
+}
+
 func (r *MessageRepo) IsParticipant(ctx context.Context, conversationID, userID string) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx,

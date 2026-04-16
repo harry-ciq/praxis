@@ -1,7 +1,6 @@
 "use client";
 
 import { useAuth } from "@/hooks/use-auth";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   Avatar,
@@ -19,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Bell, Search, LogOut, User, Settings } from "lucide-react";
 import Link from "next/link";
+import { SearchCommand } from "@/components/layout/search-command";
 
 export function Navbar() {
   const { user, logout } = useAuth();
@@ -43,13 +43,7 @@ export function Navbar() {
       </Link>
 
       {/* Search */}
-      <div className="relative hidden flex-1 max-w-md sm:block">
-        <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
-        <Input
-          placeholder="Search..."
-          className="h-8 border-zinc-800 bg-zinc-900 pl-8 text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-700"
-        />
-      </div>
+      <SearchCommand />
 
       <div className="ml-auto flex items-center gap-2">
         {/* Mobile search button */}

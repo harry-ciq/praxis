@@ -211,6 +211,22 @@ func (s *UserService) GetFollowing(ctx context.Context, username string, viewerI
 	return s.toUserSummaries(ctx, users, viewerID)
 }
 
+func (s *UserService) SearchUsers(ctx context.Context, query string, viewerID string, limit, offset int) ([]UserSummary, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	users, err := s.userRepo.SearchUsers(ctx, query, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.toUserSummaries(ctx, users, viewerID)
+}
+
 func (s *UserService) toUserSummaries(ctx context.Context, users []repository.User, viewerID string) ([]UserSummary, error) {
 	summaries := make([]UserSummary, 0, len(users))
 	for _, u := range users {

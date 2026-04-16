@@ -35,6 +35,38 @@ func NewUserHandler(
 	}
 }
 
+// SearchUsers searches for users by name or username.
+// GET /api/v1/users/search?q=harry&limit=10
+func (h *UserHandler) SearchUsers(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if query == "" || len(query) < 2 {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"users": []interface{}{},
+		})
+		return
+	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var viewerID string
+	if claims := middleware.GetUserFromContext(r.Context()); claims != nil {
+		viewerID = claims.UserID
+	}
+
+	users, err := h.userService.SearchUsers(r.Context(), query, viewerID, limit, 0)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to search users")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"users": users,
+	})
+}
+
 // GetProfile returns a user's public profile.
 // GET /api/v1/users/{username}
 func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {

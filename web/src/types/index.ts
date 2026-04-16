@@ -133,10 +133,19 @@ export interface FeedResponse {
 }
 
 // --- Messaging ---
+export interface ConversationParticipant {
+  id: string;
+  username: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
 export interface Conversation {
   id: string;
-  participants: Pick<UserProfile, "id" | "username" | "name" | "avatarUrl">[];
-  lastMessage: Message | null;
+  participants: ConversationParticipant[];
+  lastMessageContent: string | null;
+  lastMessageSenderId: string | null;
+  lastMessageAt: string | null;
   unreadCount: number;
   updatedAt: string;
 }

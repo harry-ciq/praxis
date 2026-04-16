@@ -138,9 +138,10 @@ func main() {
 			})
 		})
 
-		// User profile (public, with optional auth for isFollowing)
+		// User routes (public, with optional auth for isFollowing)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.TryAuthMiddleware(authService))
+			r.Get("/users/search", userHandler.SearchUsers)
 			r.Get("/users/{username}", userHandler.GetProfile)
 			r.Get("/users/{username}/achievements", userHandler.GetUserAchievements)
 			r.Get("/users/{username}/followers", userHandler.ListFollowers)
@@ -194,8 +195,10 @@ func main() {
 			r.Route("/conversations", func(r chi.Router) {
 				r.Get("/", messageHandler.ListConversations)
 				r.Post("/", messageHandler.CreateConversation)
+				r.Delete("/{id}", messageHandler.DeleteConversation)
 				r.Get("/{id}/messages", messageHandler.ListMessages)
 				r.Post("/{id}/messages", messageHandler.SendMessage)
+				r.Delete("/{id}/messages/{messageId}", messageHandler.DeleteMessage)
 				r.Patch("/{id}/read", messageHandler.MarkRead)
 			})
 		})

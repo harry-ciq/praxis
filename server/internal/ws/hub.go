@@ -74,6 +74,11 @@ func (h *Hub) Run() {
 				h.mu.RLock()
 				for _, userID := range msg.UserIDs {
 					if clients, ok := h.clients[userID]; ok {
+						h.logger.Info("delivering ws message to connected user",
+							zap.String("type", msg.Type),
+							zap.String("targetUserID", userID),
+							zap.Int("clientCount", len(clients)),
+						)
 						for client := range clients {
 							select {
 							case client.send <- data:

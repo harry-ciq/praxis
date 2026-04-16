@@ -46,6 +46,7 @@ func (h *WebSocketHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	claims, err := h.authService.ValidateAccessToken(token)
 	if err != nil {
+		h.logger.Warn("websocket auth failed", zap.Error(err))
 		writeError(w, http.StatusUnauthorized, "invalid or expired token")
 		return
 	}
@@ -55,6 +56,8 @@ func (h *WebSocketHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("websocket upgrade failed", zap.Error(err))
 		return
 	}
+
+	h.logger.Info("websocket client connected", zap.String("userID", claims.UserID))
 
 	client := ws.NewClient(h.hub, conn, claims.UserID)
 	h.hub.Register(client)

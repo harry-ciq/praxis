@@ -126,6 +126,38 @@ func (r *UserRepo) UpdateUser(ctx context.Context, id string, name, bio, headlin
 	return &u, nil
 }
 
+func (r *UserRepo) SearchUsers(ctx context.Context, query string, limit, offset int) ([]User, error) {
+	pattern := "%" + query + "%"
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, username, email, name, bio, avatar_url, headline, location, website_url, social_links, created_at, updated_at
+		 FROM users
+		 WHERE username ILIKE $1 OR name ILIKE $1
+		 ORDER BY
+		   CASE WHEN username ILIKE $2 THEN 0 WHEN name ILIKE $2 THEN 1 ELSE 2 END,
+		   username ASC
+		 LIMIT $3 OFFSET $4`,
+		pattern, query+"%", limit, offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Name, &u.Bio, &u.AvatarURL, &u.Headline,
+			&u.Location, &u.WebsiteURL, &u.SocialLinks, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	if users == nil {
+		users = []User{}
+	}
+	return users, rows.Err()
+}
+
 func (r *UserRepo) CreateAuthAccount(ctx context.Context, userID, provider, providerAccountID, accessToken, refreshToken string) (*AuthAccount, error) {
 	var a AuthAccount
 	err := r.pool.QueryRow(ctx,

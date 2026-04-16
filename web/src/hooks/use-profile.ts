@@ -57,6 +57,8 @@ export function useFollow() {
       queryClient.invalidateQueries({ queryKey: ["profile", username] });
       queryClient.invalidateQueries({ queryKey: ["followers"] });
       queryClient.invalidateQueries({ queryKey: ["following"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["search-users"] });
     },
   });
 
@@ -67,6 +69,8 @@ export function useFollow() {
       queryClient.invalidateQueries({ queryKey: ["profile", username] });
       queryClient.invalidateQueries({ queryKey: ["followers"] });
       queryClient.invalidateQueries({ queryKey: ["following"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["search-users"] });
     },
   });
 

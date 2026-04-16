@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/praxis-social/praxis/server/internal/middleware"
 	"github.com/praxis-social/praxis/server/internal/repository"
@@ -186,6 +187,67 @@ func (h *MessageHandler) MarkRead(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to mark as read")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// DeleteMessage deletes a message sent by the authenticated user.
+// DELETE /api/v1/conversations/{id}/messages/{messageId}
+func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	messageID := chi.URLParam(r, "messageId")
+	if conversationID == "" || messageID == "" {
+		writeError(w, http.StatusBadRequest, "conversation id and message id are required")
+		return
+	}
+
+	err := h.messageService.DeleteMessage(r.Context(), conversationID, messageID, claims.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotParticipant) {
+			writeError(w, http.StatusForbidden, "not a participant in this conversation")
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "message not found or not your message")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// DeleteConversation deletes a conversation and all its messages.
+// DELETE /api/v1/conversations/{id}
+func (h *MessageHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	if conversationID == "" {
+		writeError(w, http.StatusBadRequest, "conversation id is required")
+		return
+	}
+
+	err := h.messageService.DeleteConversation(r.Context(), conversationID, claims.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotParticipant) {
+			writeError(w, http.StatusForbidden, "not a participant in this conversation")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to delete conversation")
 		return
 	}
 

@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import { Navbar } from "@/components/layout/navbar";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Loader2 } from "lucide-react";
+import { useSocket } from "@/hooks/use-socket";
 
 export default function MainLayout({
   children,
@@ -14,6 +15,7 @@ export default function MainLayout({
 }) {
   const { isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
+  useSocket(); // Keep WebSocket connected for real-time messaging & notifications
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {

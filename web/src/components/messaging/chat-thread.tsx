@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { useAuth } from "@/hooks/use-auth";
-import { useSocket } from "@/hooks/use-socket";
+import { socket } from "@/lib/socket";
 import { MessageBubble } from "@/components/messaging/message-bubble";
 import {
   Avatar,
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Send, Loader2 } from "lucide-react";
+import { ArrowLeft, Send, Loader2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import type { Message, Conversation } from "@/types";
 
@@ -23,28 +24,66 @@ interface ChatThreadProps {
 
 export function ChatThread({ conversationId }: ChatThreadProps) {
   const { user } = useAuth();
-  const { socket } = useSocket();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [newMessage, setNewMessage] = useState("");
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data: conversation } = useQuery({
-    queryKey: ["conversation", conversationId],
-    queryFn: () => api.get<Conversation>(`/conversations/${conversationId}`),
-    enabled: false,
+  // Track locally-added messages (from send + WebSocket) separately
+  // so we don't fight with React Query's reference identity
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+
+  // Fetch conversations list to get participant info
+  const { data: conversations } = useQuery({
+    queryKey: ["conversations"],
+    queryFn: () => api.get<Conversation[]>("/conversations"),
   });
 
-  const { data: messages = [], isLoading } = useQuery({
+  const currentConversation = useMemo(
+    () => (conversations ?? []).find((c) => c.id === conversationId),
+    [conversations, conversationId],
+  );
+
+  const otherParticipant = useMemo(() => {
+    if (!currentConversation) return null;
+    return (
+      currentConversation.participants.find((p) => p.id !== user?.id) ??
+      currentConversation.participants[0] ??
+      null
+    );
+  }, [currentConversation, user?.id]);
+
+  // Fetch messages — backend returns DESC, reverse for chronological display
+  const { data: fetchedMessages, isLoading } = useQuery({
     queryKey: ["messages", conversationId],
-    queryFn: () =>
-      api.get<Message[]>(`/conversations/${conversationId}/messages`),
+    queryFn: async () => {
+      const msgs = await api.get<Message[]>(
+        `/conversations/${conversationId}/messages`,
+      );
+      return [...msgs].reverse();
+    },
   });
 
-  const otherParticipant = conversation?.participants.find(
-    (p) => p.id !== user?.id,
-  ) ?? conversation?.participants[0];
+  // Reset local messages when fetched data changes (e.g. refetch after delete)
+  const fetchedIds = useMemo(
+    () => (fetchedMessages ?? []).map((m) => m.id).join(","),
+    [fetchedMessages],
+  );
+
+  useEffect(() => {
+    setLocalMessages([]);
+  }, [fetchedIds]);
+
+  // Merge fetched + local messages, deduplicating by id
+  const messages = useMemo(() => {
+    const fetched = fetchedMessages ?? [];
+    if (localMessages.length === 0) return fetched;
+    const ids = new Set(fetched.map((m) => m.id));
+    const unique = localMessages.filter((m) => !ids.has(m.id));
+    return [...fetched, ...unique];
+  }, [fetchedMessages, localMessages]);
 
   // Mark as read on mount
   useEffect(() => {
@@ -54,26 +93,45 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
 
   // Listen for new messages via WebSocket
   useEffect(() => {
-    const unsubscribe = socket.on("message", (data) => {
+    const unsubMessage = socket.on("message", (data) => {
       const msg = data as Message;
       if (msg.conversationId === conversationId) {
-        queryClient.setQueryData<Message[]>(
-          ["messages", conversationId],
-          (old) => (old ? [...old, msg] : [msg]),
-        );
-        // Mark as read since we're viewing this conversation
+        setLocalMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
         api.patch(`/conversations/${conversationId}/read`).catch(() => {});
       }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
 
-    return () => { unsubscribe(); };
-  }, [socket, conversationId, queryClient]);
+    const unsubDeleted = socket.on("message_deleted", (data) => {
+      const { messageId, conversationId: convId } = data as {
+        messageId: string;
+        conversationId: string;
+      };
+      if (convId === conversationId) {
+        setLocalMessages((prev) => prev.filter((m) => m.id !== messageId));
+        // Also remove from query cache
+        queryClient.setQueryData<Message[]>(
+          ["messages", conversationId],
+          (old) => old?.filter((m) => m.id !== messageId),
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    });
 
-  // Auto-scroll to bottom
+    return () => {
+      unsubMessage();
+      unsubDeleted();
+    };
+  }, [conversationId, queryClient]);
+
+  // Auto-scroll to bottom when message count changes
+  const messageCount = messages.length;
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messageCount]);
 
   const handleSend = useCallback(async () => {
     const content = newMessage.trim();
@@ -85,16 +143,47 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
         `/conversations/${conversationId}/messages`,
         { content },
       );
-      queryClient.setQueryData<Message[]>(
-        ["messages", conversationId],
-        (old) => (old ? [...old, msg] : [msg]),
-      );
+      setLocalMessages((prev) => {
+        if (prev.some((m) => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setNewMessage("");
     } finally {
       setSending(false);
     }
   }, [newMessage, conversationId, queryClient]);
+
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      try {
+        await api.delete(
+          `/conversations/${conversationId}/messages/${messageId}`,
+        );
+        // Remove from local state
+        setLocalMessages((prev) => prev.filter((m) => m.id !== messageId));
+        // Remove from query cache
+        queryClient.setQueryData<Message[]>(
+          ["messages", conversationId],
+          (old) => old?.filter((m) => m.id !== messageId),
+        );
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      } catch {
+        // ignore
+      }
+    },
+    [conversationId, queryClient],
+  );
+
+  const handleDeleteConversation = useCallback(async () => {
+    try {
+      await api.delete(`/conversations/${conversationId}`);
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      router.push("/messages");
+    } catch {
+      // ignore
+    }
+  }, [conversationId, queryClient, router]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -122,8 +211,11 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
         >
           <ArrowLeft className="size-5" />
         </Link>
-        {otherParticipant && (
-          <>
+        {otherParticipant ? (
+          <Link
+            href={`/profile/${otherParticipant.username}`}
+            className="flex flex-1 items-center gap-3 transition-opacity hover:opacity-80"
+          >
             <Avatar size="sm">
               {otherParticipant.avatarUrl && (
                 <AvatarImage
@@ -143,8 +235,19 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
                 @{otherParticipant.username}
               </p>
             </div>
-          </>
+          </Link>
+        ) : (
+          <div className="flex-1" />
         )}
+
+        {/* Delete conversation */}
+        <button
+          onClick={handleDeleteConversation}
+          className="flex size-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-red-950/50 hover:text-red-400"
+          title="Delete conversation"
+        >
+          <Trash2 className="size-4" />
+        </button>
       </div>
 
       {/* Messages */}
@@ -168,6 +271,7 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
               key={message.id}
               message={message}
               isOwn={message.senderId === user?.id}
+              onDelete={handleDeleteMessage}
             />
           ))
         )}

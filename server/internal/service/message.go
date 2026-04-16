@@ -121,6 +121,11 @@ func (s *MessageService) SendMessage(ctx context.Context, conversationID, sender
 		for i, p := range participants {
 			userIDs[i] = p.ID
 		}
+		s.logger.Info("broadcasting message via WebSocket",
+			zap.String("conversationID", conversationID),
+			zap.String("messageID", msg.ID),
+			zap.Strings("targetUserIDs", userIDs),
+		)
 		s.hub.SendToUsers(userIDs, &ws.WSMessage{
 			Type: "message",
 			Data: msg,
@@ -159,6 +164,52 @@ func (s *MessageService) ListMessages(ctx context.Context, conversationID, userI
 	}
 
 	return s.messageRepo.ListMessages(ctx, conversationID, limit, offset)
+}
+
+// DeleteMessage deletes a message if the user is the sender.
+func (s *MessageService) DeleteMessage(ctx context.Context, conversationID, messageID, userID string) error {
+	isParticipant, err := s.messageRepo.IsParticipant(ctx, conversationID, userID)
+	if err != nil {
+		return err
+	}
+	if !isParticipant {
+		return ErrNotParticipant
+	}
+
+	if err := s.messageRepo.DeleteMessage(ctx, messageID, userID); err != nil {
+		return err
+	}
+
+	// Notify participants about the deletion via WebSocket
+	participants, err := s.messageRepo.GetParticipants(ctx, conversationID)
+	if err == nil {
+		userIDs := make([]string, len(participants))
+		for i, p := range participants {
+			userIDs[i] = p.ID
+		}
+		s.hub.SendToUsers(userIDs, &ws.WSMessage{
+			Type: "message_deleted",
+			Data: map[string]string{
+				"messageId":      messageID,
+				"conversationId": conversationID,
+			},
+		})
+	}
+
+	return nil
+}
+
+// DeleteConversation deletes a conversation if the user is a participant.
+func (s *MessageService) DeleteConversation(ctx context.Context, conversationID, userID string) error {
+	isParticipant, err := s.messageRepo.IsParticipant(ctx, conversationID, userID)
+	if err != nil {
+		return err
+	}
+	if !isParticipant {
+		return ErrNotParticipant
+	}
+
+	return s.messageRepo.DeleteConversation(ctx, conversationID)
 }
 
 // MarkRead marks a conversation as read for the user.
