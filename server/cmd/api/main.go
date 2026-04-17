@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -102,6 +103,14 @@ func main() {
 	hub := ws.NewHub(logger)
 	go hub.Run()
 
+	// Asynq client for enqueueing background tasks
+	asynqRedisOpt, err := asynq.ParseRedisURI(cfg.RedisURL)
+	if err != nil {
+		logger.Fatal("failed to parse redis URI for asynq", zap.Error(err))
+	}
+	asynqClient := asynq.NewClient(asynqRedisOpt)
+	defer asynqClient.Close()
+
 	// Services
 	authService := service.NewAuthService(userRepo, rdb, cfg)
 	achievementService := service.NewAchievementService(achievementRepo, providerRepo, userRepo, skillRepo, providerRegistry, logger)
@@ -119,9 +128,15 @@ func main() {
 	jobHandler := handler.NewJobHandler(jobService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	wsHandler := handler.NewWebSocketHandler(hub, authService, logger)
+	webhookHandler := handler.NewWebhookHandler(asynqClient, userRepo, cfg.GitHubWebhookSecret, logger)
 
 	// WebSocket route (uses query param token, not auth middleware)
 	r.Get("/ws", wsHandler.HandleWS)
+
+	// Webhook routes (signature-validated, no auth middleware)
+	r.Route("/api/v1/webhooks", func(r chi.Router) {
+		r.Post("/github", webhookHandler.GitHub)
+	})
 
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {

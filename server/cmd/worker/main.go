@@ -1,15 +1,24 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/hibiken/asynq"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/praxis-social/praxis/server/internal/config"
+	"github.com/praxis-social/praxis/server/internal/provider"
+	"github.com/praxis-social/praxis/server/internal/repository"
+	"github.com/praxis-social/praxis/server/internal/service"
+	"github.com/praxis-social/praxis/server/internal/worker"
 )
 
 func main() {
@@ -28,9 +37,42 @@ func main() {
 	}
 	defer logger.Sync()
 
-	redisOpt, err := asynq.ParseRedisURI(cfg.RedisURL)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// PostgreSQL
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		logger.Fatal("failed to connect to database", zap.Error(err))
+	}
+	defer pool.Close()
+
+	// Redis (for AuthService dependency, even though worker doesn't need it directly)
+	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		logger.Fatal("failed to parse redis URL", zap.Error(err))
+	}
+	rdb := redis.NewClient(redisOpts)
+	defer rdb.Close()
+
+	// Repositories
+	userRepo := repository.NewUserRepo(pool)
+	achievementRepo := repository.NewAchievementRepo(pool)
+	providerRepo := repository.NewProviderRepo(pool)
+	skillRepo := repository.NewSkillRepo(pool)
+
+	// Provider registry
+	registry := provider.NewRegistry()
+	registry.Register(provider.NewGitHubProvider())
+	registry.Register(provider.NewYouTubeProvider())
+
+	// Services
+	achievementService := service.NewAchievementService(achievementRepo, providerRepo, userRepo, skillRepo, registry, logger)
+
+	// Asynq server
+	redisOpt, err := asynq.ParseRedisURI(cfg.RedisURL)
+	if err != nil {
+		logger.Fatal("failed to parse redis URI for asynq", zap.Error(err))
 	}
 
 	srv := asynq.NewServer(
@@ -45,13 +87,26 @@ func main() {
 		},
 	)
 
+	handlers := worker.NewHandlers(achievementService, logger)
 	mux := asynq.NewServeMux()
+	mux.HandleFunc(worker.TaskProviderSync, handlers.HandleProviderSync)
+	mux.HandleFunc(worker.TaskEmailNotify, handlers.HandleEmailNotify)
 
-	// Register task handlers here as they are implemented.
-	// Example:
-	//   mux.HandleFunc("email:welcome", handleWelcomeEmail)
-	//   mux.HandleFunc("notification:push", handlePushNotification)
+	// Asynq client (for the scheduler to enqueue tasks)
+	client := asynq.NewClient(redisOpt)
+	defer client.Close()
 
+	// Periodic scheduler
+	intervalHours := 6
+	if v := os.Getenv("SYNC_INTERVAL_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			intervalHours = n
+		}
+	}
+	scheduler := worker.NewScheduler(client, providerRepo, time.Duration(intervalHours)*time.Hour, logger)
+	go scheduler.Run(ctx)
+
+	// Run worker
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
@@ -64,6 +119,7 @@ func main() {
 
 	<-done
 	logger.Info("worker shutting down")
+	cancel()
 	srv.Shutdown()
 	logger.Info("worker stopped")
 }

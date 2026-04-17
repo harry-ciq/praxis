@@ -63,17 +63,19 @@ Phases are shippable slices — each one adds a working feature that can be test
 
 ---
 
-## Phase 9 — Achievement-Based Job Matching **[NOT STARTED]**
-- Jobs specify required achievements (e.g., `COMMIT_STREAK:30`, `STARS:100`)
-- Match score calculation: user's verified achievements vs job requirements
-- Surface match percentage on job cards
-- Filter jobs by "qualified" based on user's achievement portfolio
+## Phase 9 — Achievement-Based Job Matching **[DONE]**
+- Threshold-aware match scoring: `TYPE` (any), `TYPE:N` for thresholds (stars/subs/views) or counts (PRs/repos/videos)
+- `?qualified=true` filter returns only fully qualified jobs
+- Match badge with % on job cards (green at 100%, amber partial, grey 0)
+- Per-requirement check marks on job detail page
+- Nested company shape in job response
 
-## Phase 10 — Background Workers **[NOT STARTED]**
-- Asynq (Redis-backed) job queue for async processing
-- `SyncGitHub` worker: periodic re-sync of connected accounts
-- Webhook endpoint (`POST /api/v1/webhooks/github`) for push-based events
-- Email notification worker (new follower, job match)
+## Phase 10 — Background Workers **[DONE]**
+- Asynq (Redis-backed) job queue with critical/default/low queues
+- `provider:sync` task — re-syncs achievements for any connected provider
+- Periodic scheduler enqueues syncs every `SYNC_INTERVAL_HOURS` (default 6h)
+- `POST /api/v1/webhooks/github` with HMAC-SHA256 signature verification, enqueues a critical-priority sync for the sender
+- `email:notify` task placeholder (logs only; ready for SES/SendGrid wiring)
 
 ## Phase 11 — Additional Providers **[DONE]**
 - YouTube provider: video published, subscriber milestones, view milestones, channel created

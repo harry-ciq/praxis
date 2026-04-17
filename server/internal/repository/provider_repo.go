@@ -95,6 +95,33 @@ func (r *ProviderRepo) List(ctx context.Context, userID string) ([]ConnectedProv
 	return results, nil
 }
 
+// ListAll returns every connected provider across all users — used by the
+// periodic sync scheduler.
+func (r *ProviderRepo) ListAll(ctx context.Context) ([]ConnectedProvider, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, user_id, provider, provider_username, last_synced_at, sync_status, created_at
+		 FROM connected_providers
+		 ORDER BY last_synced_at NULLS FIRST`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ConnectedProvider
+	for rows.Next() {
+		var cp ConnectedProvider
+		if err := rows.Scan(&cp.ID, &cp.UserID, &cp.Provider, &cp.ProviderUsername, &cp.LastSyncedAt, &cp.SyncStatus, &cp.CreatedAt); err != nil {
+			return nil, err
+		}
+		results = append(results, cp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 func (r *ProviderRepo) Delete(ctx context.Context, userID, provider string) error {
 	_, err := r.pool.Exec(ctx,
 		`DELETE FROM connected_providers WHERE user_id = $1 AND provider = $2`,

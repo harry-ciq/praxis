@@ -20,6 +20,7 @@ type Config struct {
 	GitHubClientSecret string
 	GoogleClientID     string
 	GoogleClientSecret string
+	GitHubWebhookSecret string
 	FrontendURL        string
 	Environment        string
 }
@@ -34,6 +35,7 @@ func Load() *Config {
 		GitHubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GitHubWebhookSecret: getEnv("GITHUB_WEBHOOK_SECRET", ""),
 		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:3000"),
 		Environment:        getEnv("ENVIRONMENT", "development"),
 	}
