@@ -6,7 +6,8 @@ import { api } from "@/lib/api-client";
 import { JobCard } from "@/components/jobs/job-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search, Briefcase, Loader2, Sparkles } from "lucide-react";
+import { Search, Briefcase, Sparkles } from "lucide-react";
+import { CardSkeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { Job, JobType } from "@/types";
 
@@ -93,8 +94,10 @@ export default function JobsPage() {
 
       {/* Job listing */}
       {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="size-8 animate-spin text-zinc-500" />
+        <div className="flex flex-col gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <CardSkeleton key={i} />
+          ))}
         </div>
       ) : jobs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">

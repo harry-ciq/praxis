@@ -14,8 +14,41 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Praxis",
-  description: "Where execution speaks louder than words",
+  title: {
+    default: "Praxis — Where execution speaks louder than words",
+    template: "%s · Praxis",
+  },
+  description:
+    "Praxis is a professional network where every claim is verified by your work — GitHub commits, YouTube videos, and more. Build a portfolio of real, immutable achievements.",
+  applicationName: "Praxis",
+  keywords: [
+    "portfolio",
+    "developer",
+    "github",
+    "youtube",
+    "achievements",
+    "verified",
+    "professional network",
+    "hiring",
+  ],
+  openGraph: {
+    title: "Praxis",
+    description:
+      "Where execution speaks louder than words. A verified portfolio of your real achievements.",
+    siteName: "Praxis",
+    type: "website",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Praxis",
+    description:
+      "Where execution speaks louder than words. A verified portfolio of your real achievements.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({

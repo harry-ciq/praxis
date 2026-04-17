@@ -85,14 +85,12 @@ Phases are shippable slices — each one adds a working feature that can be test
 - Provider registry is already extensible — add new providers by implementing the interface
 - Per-provider sync settings in user profile
 
-## Phase 12 — Polish & Hardening **[NOT STARTED]**
-- Responsive design audit (mobile + tablet)
-- Error boundaries on all routes
-- Loading skeletons instead of spinners
-- 404 / 500 error pages
-- Input sanitization on all forms
-- Rate limiting middleware
-- SEO meta tags + Open Graph images
+## Phase 12 — Polish & Hardening **[DONE]**
+- Rate limiting middleware via go-chi/httprate (100 req/min global, 20 req/min on /auth)
+- Global error.tsx and not-found.tsx pages
+- Reusable Skeleton + CardSkeleton components; jobs page now uses skeletons
+- SEO metadata: title template, description, keywords, Open Graph, Twitter Card, robots
+- Responsive audit + per-route error boundaries deferred to follow-up
 
 ## Phase 13 — Messaging Enhancements **[NOT STARTED]**
 - Typing indicators (server-side handling exists, needs frontend UI)

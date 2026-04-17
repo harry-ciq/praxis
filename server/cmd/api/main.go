@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/go-chi/httprate"
 	"github.com/hibiken/asynq"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -79,6 +80,9 @@ func main() {
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(chimw.Recoverer)
 	r.Use(cors.Handler(middleware.CORSConfig(cfg.FrontendURL)))
+	// Global rate limit: 100 req/min per IP. Keeps generic abuse out without
+	// being too aggressive on real usage.
+	r.Use(httprate.LimitByIP(100, time.Minute))
 
 	// Health check
 	r.Get("/health", handler.HealthCheck())
@@ -140,8 +144,9 @@ func main() {
 
 	// API v1 routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Auth routes (public)
+		// Auth routes (public, tighter rate limit)
 		r.Route("/auth", func(r chi.Router) {
+			r.Use(httprate.LimitByIP(20, time.Minute))
 			r.Get("/github", authHandler.GitHubLogin)
 			r.Post("/github/callback", authHandler.GitHubCallback)
 			r.Get("/youtube", authHandler.YouTubeLogin)
