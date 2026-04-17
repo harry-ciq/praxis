@@ -175,6 +175,10 @@ export interface Job {
   requiredAchievements: string[];
   status: JobStatus;
   createdAt: string;
+  // Match info populated when the request is authenticated
+  matchedAchievements?: number;
+  totalRequired?: number;
+  matchedRequirements?: string[];
 }
 
 export interface Company {

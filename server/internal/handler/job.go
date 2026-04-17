@@ -19,12 +19,18 @@ func NewJobHandler(jobService *service.JobService) *JobHandler {
 }
 
 // ListJobs returns active job listings.
-// GET /api/v1/jobs
+// GET /api/v1/jobs?qualified=true
 func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	qualified := r.URL.Query().Get("qualified") == "true"
 
-	jobs, err := h.jobService.ListJobs(r.Context(), limit, offset)
+	var userID string
+	if claims := middleware.GetUserFromContext(r.Context()); claims != nil {
+		userID = claims.UserID
+	}
+
+	jobs, err := h.jobService.ListJobs(r.Context(), userID, qualified, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list jobs")
 		return
@@ -33,7 +39,7 @@ func (h *JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, jobs)
 }
 
-// GetJob returns a single job by ID.
+// GetJob returns a single job by ID with match info.
 // GET /api/v1/jobs/{id}
 func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -42,7 +48,12 @@ func (h *JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.jobService.GetJob(r.Context(), id)
+	var userID string
+	if claims := middleware.GetUserFromContext(r.Context()); claims != nil {
+		userID = claims.UserID
+	}
+
+	job, err := h.jobService.GetJob(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get job")
 		return

@@ -6,8 +6,7 @@ import { api } from "@/lib/api-client";
 import { JobCard } from "@/components/jobs/job-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Search, Briefcase, Loader2 } from "lucide-react";
+import { Search, Briefcase, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Job, JobType } from "@/types";
 
@@ -22,13 +21,15 @@ const JOB_TYPES: { value: JobType | "ALL"; label: string }[] = [
 export default function JobsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<JobType | "ALL">("ALL");
+  const [qualifiedOnly, setQualifiedOnly] = useState(false);
 
   const { data: jobs = [], isLoading } = useQuery({
-    queryKey: ["jobs", search, typeFilter],
+    queryKey: ["jobs", search, typeFilter, qualifiedOnly],
     queryFn: () => {
       const params: Record<string, string> = {};
       if (search) params.search = search;
       if (typeFilter !== "ALL") params.jobType = typeFilter;
+      if (qualifiedOnly) params.qualified = "true";
       return api.get<Job[]>("/jobs", params);
     },
   });
@@ -56,7 +57,7 @@ export default function JobsPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-6 flex flex-wrap items-center gap-2">
         {JOB_TYPES.map((type) => (
           <Button
             key={type.value}
@@ -72,6 +73,22 @@ export default function JobsPage() {
             {type.label}
           </Button>
         ))}
+        <div className="ml-auto">
+          <Button
+            variant={qualifiedOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => setQualifiedOnly((q) => !q)}
+            className={cn(
+              "gap-1.5",
+              qualifiedOnly
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "border-zinc-700 text-zinc-400 hover:text-zinc-200"
+            )}
+          >
+            <Sparkles className="size-3.5" />
+            Qualified only
+          </Button>
+        </div>
       </div>
 
       {/* Job listing */}

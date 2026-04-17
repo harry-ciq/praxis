@@ -14,7 +14,10 @@ import {
   Globe,
   ArrowLeft,
   Loader2,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/format";
 import Link from "next/link";
 import type { Job } from "@/types";
@@ -130,24 +133,77 @@ export default function JobDetailPage({
           </div>
 
           {/* Required achievements */}
-          {job.requiredAchievements.length > 0 && (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-              <h2 className="mb-3 text-lg font-semibold text-zinc-100">
-                Required Achievements
-              </h2>
-              <div className="flex flex-col gap-2">
-                {job.requiredAchievements.map((achievement) => (
-                  <div
-                    key={achievement}
-                    className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
-                  >
-                    <Trophy className="size-5 text-amber-500" />
-                    <span className="text-sm text-zinc-200">{achievement}</span>
-                  </div>
-                ))}
+          {job.requiredAchievements.length > 0 && (() => {
+            const matchedSet = new Set(job.matchedRequirements ?? []);
+            const matched = job.matchedAchievements ?? 0;
+            const total = job.totalRequired ?? job.requiredAchievements.length;
+            const hasMatchData = job.matchedAchievements !== undefined;
+            const pct = total > 0 ? Math.round((matched / total) * 100) : 0;
+            const fullyQualified = hasMatchData && matched === total;
+
+            return (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-zinc-100">
+                    Required Achievements
+                  </h2>
+                  {hasMatchData && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums",
+                        fullyQualified
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                          : matched > 0
+                            ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
+                            : "border-zinc-700 bg-zinc-800/50 text-zinc-400"
+                      )}
+                    >
+                      {fullyQualified && <CheckCircle2 className="size-3.5" />}
+                      {matched}/{total} · {pct}% match
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {job.requiredAchievements.map((achievement) => {
+                    const isMatched = matchedSet.has(achievement);
+                    return (
+                      <div
+                        key={achievement}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg border px-4 py-3",
+                          hasMatchData
+                            ? isMatched
+                              ? "border-emerald-500/30 bg-emerald-500/5"
+                              : "border-zinc-800 bg-zinc-900"
+                            : "border-zinc-800 bg-zinc-900"
+                        )}
+                      >
+                        {hasMatchData ? (
+                          isMatched ? (
+                            <CheckCircle2 className="size-5 text-emerald-400" />
+                          ) : (
+                            <XCircle className="size-5 text-zinc-600" />
+                          )
+                        ) : (
+                          <Trophy className="size-5 text-amber-500" />
+                        )}
+                        <span
+                          className={cn(
+                            "text-sm",
+                            hasMatchData && isMatched
+                              ? "text-emerald-100"
+                              : "text-zinc-200"
+                          )}
+                        >
+                          {achievement}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Apply section (mobile) */}
           <div className="lg:hidden">

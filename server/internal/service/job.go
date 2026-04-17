@@ -4,17 +4,68 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/praxis-social/praxis/server/internal/repository"
 )
 
-type JobWithMatchScore struct {
-	repository.JobWithCompany
-	MatchedAchievements int `json:"matchedAchievements"`
-	TotalRequired       int `json:"totalRequired"`
+// JobCompany is the company info nested inside the job response.
+type JobCompany struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	LogoURL string `json:"logoUrl"`
+	Website string `json:"website"`
+}
+
+// JobResponse is the API shape for a job — match frontend Job type.
+type JobResponse struct {
+	ID                   string          `json:"id"`
+	Title                string          `json:"title"`
+	Description          string          `json:"description"`
+	Location             string          `json:"location"`
+	JobType              string          `json:"jobType"`
+	SalaryRange          string          `json:"salaryRange"`
+	RequiredAchievements []string        `json:"requiredAchievements"`
+	Status               string          `json:"status"`
+	CreatedAt            time.Time       `json:"createdAt"`
+	Company              JobCompany      `json:"company"`
+	MatchedAchievements  int             `json:"matchedAchievements"`
+	TotalRequired        int             `json:"totalRequired"`
+	MatchedRequirements  []string        `json:"matchedRequirements"`
+}
+
+func toJobResponse(job repository.JobWithCompany, matched int, matchedList []string) JobResponse {
+	var reqs []string
+	if err := json.Unmarshal(job.RequiredAchievements, &reqs); err != nil || reqs == nil {
+		reqs = []string{}
+	}
+	if matchedList == nil {
+		matchedList = []string{}
+	}
+	return JobResponse{
+		ID:                   job.ID,
+		Title:                job.Title,
+		Description:          job.Description,
+		Location:             job.Location,
+		JobType:              job.JobType,
+		SalaryRange:          job.SalaryRange,
+		RequiredAchievements: reqs,
+		Status:               job.Status,
+		CreatedAt:            job.CreatedAt,
+		Company: JobCompany{
+			ID:      job.CompanyID,
+			Name:    job.CompanyName,
+			LogoURL: job.CompanyLogoURL,
+			Website: job.CompanyWebsite,
+		},
+		MatchedAchievements: matched,
+		TotalRequired:       len(reqs),
+		MatchedRequirements: matchedList,
+	}
 }
 
 type JobService struct {
@@ -35,8 +86,9 @@ func NewJobService(
 	}
 }
 
-// ListJobs returns active jobs with pagination.
-func (s *JobService) ListJobs(ctx context.Context, limit, offset int) ([]JobWithMatchScore, error) {
+// ListJobs returns active jobs with pagination, scored against the optional userID.
+// If qualifiedOnly is true, jobs are filtered to those where the user meets all requirements.
+func (s *JobService) ListJobs(ctx context.Context, userID string, qualifiedOnly bool, limit, offset int) ([]JobResponse, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -52,24 +104,56 @@ func (s *JobService) ListJobs(ctx context.Context, limit, offset int) ([]JobWith
 		return nil, fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	results := make([]JobWithMatchScore, len(jobs))
-	for i, job := range jobs {
-		results[i] = JobWithMatchScore{
-			JobWithCompany: job,
+	// Pre-fetch user achievements once if a user is provided.
+	var userAchievements []repository.AchievementWithUser
+	if userID != "" {
+		userAchievements, err = s.achievementRepo.ListByUserID(ctx, userID, 1000, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list user achievements: %w", err)
 		}
-		// Parse requirements to set TotalRequired
+	}
+
+	results := make([]JobResponse, 0, len(jobs))
+	for _, job := range jobs {
 		var reqs []string
-		if err := json.Unmarshal(job.RequiredAchievements, &reqs); err == nil {
-			results[i].TotalRequired = len(reqs)
+		_ = json.Unmarshal(job.RequiredAchievements, &reqs)
+
+		matched, matchedList := scoreRequirements(reqs, userAchievements)
+
+		// If qualified filter requested, only include jobs where user meets all requirements
+		if qualifiedOnly && (len(reqs) == 0 || matched < len(reqs)) {
+			continue
 		}
+		results = append(results, toJobResponse(job, matched, matchedList))
 	}
 
 	return results, nil
 }
 
-// GetJob returns a single job by ID.
-func (s *JobService) GetJob(ctx context.Context, id string) (*repository.JobWithCompany, error) {
-	return s.jobRepo.GetByID(ctx, id)
+// GetJob returns a single job with match info for the given user.
+func (s *JobService) GetJob(ctx context.Context, jobID, userID string) (*JobResponse, error) {
+	job, err := s.jobRepo.GetByID(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, nil
+	}
+
+	var reqs []string
+	_ = json.Unmarshal(job.RequiredAchievements, &reqs)
+
+	var userAchievements []repository.AchievementWithUser
+	if userID != "" {
+		userAchievements, err = s.achievementRepo.ListByUserID(ctx, userID, 1000, 0)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list user achievements: %w", err)
+		}
+	}
+
+	matched, matchedList := scoreRequirements(reqs, userAchievements)
+	resp := toJobResponse(*job, matched, matchedList)
+	return &resp, nil
 }
 
 // Apply applies to a job for the given user.
@@ -128,38 +212,126 @@ func (s *JobService) CreateJob(ctx context.Context, companyID, title, descriptio
 	return s.jobRepo.CreateJob(ctx, job)
 }
 
-// CalculateMatchScore checks how many required achievements a user has.
-// Requirements are formatted as "TYPE:VALUE" (e.g., "COMMIT_STREAK:30").
-// It checks if the user has achievements matching those types.
-func (s *JobService) CalculateMatchScore(ctx context.Context, userID string, requirements []string) (matched int, total int, err error) {
-	total = len(requirements)
-	if total == 0 {
-		return 0, 0, nil
+// scoreRequirements checks how many of the requirements the user satisfies.
+//
+// Requirement formats:
+//   - "TYPE"           — user needs at least one achievement of this type
+//   - "TYPE:N"         — meaning depends on the type:
+//       * threshold types (STARS_MILESTONE, SUBSCRIBERS_MILESTONE, VIEWS_MILESTONE):
+//           user needs an achievement where metadata.current >= N (or metadata.threshold >= N)
+//       * streak type (COMMIT_STREAK): user needs metadata.maxStreak >= N (fallback metadata.days)
+//       * count types (anything else, e.g. PR_MERGED, REPO_CREATED, VIDEO_PUBLISHED):
+//           user needs at least N achievements of this type
+//
+// Returns the count matched and the list of requirements that matched.
+func scoreRequirements(requirements []string, userAchievements []repository.AchievementWithUser) (int, []string) {
+	if len(requirements) == 0 {
+		return 0, nil
 	}
 
-	// Get all user achievements
-	achievements, err := s.achievementRepo.ListByUserID(ctx, userID, 1000, 0)
-	if err != nil {
-		return 0, total, fmt.Errorf("failed to list user achievements: %w", err)
+	// Group user achievements by type for fast lookup
+	byType := make(map[string][]repository.AchievementWithUser)
+	for _, a := range userAchievements {
+		byType[a.Type] = append(byType[a.Type], a)
 	}
 
-	// Build a set of achievement types the user has
-	userTypes := make(map[string]bool)
-	for _, a := range achievements {
-		userTypes[a.Type] = true
-	}
+	matched := 0
+	matchedList := make([]string, 0, len(requirements))
 
-	// Check each requirement
 	for _, req := range requirements {
-		// Parse "TYPE:VALUE" format - match on the TYPE part
 		reqType := req
+		var threshold int
+		var hasThreshold bool
+
 		if idx := strings.Index(req, ":"); idx > 0 {
 			reqType = req[:idx]
+			if n, err := strconv.Atoi(strings.TrimSpace(req[idx+1:])); err == nil {
+				threshold = n
+				hasThreshold = true
+			}
 		}
-		if userTypes[reqType] {
+
+		userAch, ok := byType[reqType]
+		if !ok {
+			continue
+		}
+
+		if !hasThreshold {
 			matched++
+			matchedList = append(matchedList, req)
+			continue
+		}
+
+		if requirementSatisfied(reqType, threshold, userAch) {
+			matched++
+			matchedList = append(matchedList, req)
 		}
 	}
 
-	return matched, total, nil
+	return matched, matchedList
+}
+
+// requirementSatisfied determines whether the user achievements satisfy a TYPE:N requirement.
+func requirementSatisfied(reqType string, threshold int, achievements []repository.AchievementWithUser) bool {
+	// Threshold-based types — check metadata.current or metadata.threshold
+	thresholdTypes := map[string]bool{
+		"STARS_MILESTONE":       true,
+		"SUBSCRIBERS_MILESTONE": true,
+		"VIEWS_MILESTONE":       true,
+	}
+	if thresholdTypes[reqType] {
+		for _, a := range achievements {
+			var meta map[string]interface{}
+			if err := json.Unmarshal(a.Metadata, &meta); err != nil {
+				continue
+			}
+			if v, ok := meta["current"]; ok {
+				if n, ok := toInt(v); ok && n >= threshold {
+					return true
+				}
+			}
+			if v, ok := meta["threshold"]; ok {
+				if n, ok := toInt(v); ok && n >= threshold {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	if reqType == "COMMIT_STREAK" {
+		for _, a := range achievements {
+			var meta map[string]interface{}
+			if err := json.Unmarshal(a.Metadata, &meta); err != nil {
+				continue
+			}
+			if v, ok := meta["maxStreak"]; ok {
+				if n, ok := toInt(v); ok && n >= threshold {
+					return true
+				}
+			}
+			if v, ok := meta["days"]; ok {
+				if n, ok := toInt(v); ok && n >= threshold {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	// Count-based types (e.g. PR_MERGED, REPO_CREATED, VIDEO_PUBLISHED)
+	return len(achievements) >= threshold
+}
+
+// toInt converts a JSON-decoded number to int.
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	}
+	return 0, false
 }
