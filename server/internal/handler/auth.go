@@ -51,6 +51,43 @@ func (h *AuthHandler) GitHubCallback(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// YouTubeLogin returns the Google OAuth authorization URL for YouTube.
+// GET /api/v1/auth/youtube
+func (h *AuthHandler) YouTubeLogin(w http.ResponseWriter, r *http.Request) {
+	url := h.authService.GoogleAuthURL()
+	writeJSON(w, http.StatusOK, map[string]string{"url": url})
+}
+
+// YouTubeCallback exchanges the Google OAuth code and links the YouTube account.
+// POST /api/v1/auth/youtube/callback
+func (h *AuthHandler) YouTubeCallback(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Code == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	err := h.authService.HandleGoogleYouTubeCallback(r.Context(), body.Code, claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "youtube connection failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "connected"})
+}
+
 // RefreshToken issues a new token pair from a valid refresh token.
 // POST /api/v1/auth/refresh
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {

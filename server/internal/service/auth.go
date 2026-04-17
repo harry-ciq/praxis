@@ -290,6 +290,147 @@ func (s *AuthService) exchangeGitHubCode(code string) (string, error) {
 	return tokenResp.AccessToken, nil
 }
 
+// GoogleAuthURL returns the Google OAuth authorization URL for YouTube access.
+func (s *AuthService) GoogleAuthURL() string {
+	params := url.Values{
+		"client_id":     {s.config.GoogleClientID},
+		"redirect_uri":  {s.config.FrontendURL + "/auth/youtube/callback"},
+		"response_type": {"code"},
+		"scope":         {"https://www.googleapis.com/auth/youtube.readonly"},
+		"access_type":   {"offline"},
+		"prompt":        {"consent"},
+	}
+	return "https://accounts.google.com/o/oauth2/v2/auth?" + params.Encode()
+}
+
+// HandleGoogleYouTubeCallback exchanges a Google OAuth code for tokens,
+// and links the YouTube account to the existing authenticated user.
+func (s *AuthService) HandleGoogleYouTubeCallback(ctx context.Context, code string, userID string) error {
+	// 1. Exchange code for Google access token
+	googleToken, err := s.exchangeGoogleCode(code)
+	if err != nil {
+		return fmt.Errorf("google code exchange failed: %w", err)
+	}
+
+	// 2. Fetch YouTube channel info to get the channel ID
+	channelInfo, err := s.getYouTubeChannelInfo(googleToken)
+	if err != nil {
+		return fmt.Errorf("failed to get youtube channel: %w", err)
+	}
+
+	// 3. Check if auth_account already exists for this YouTube channel
+	authAccount, err := s.userRepo.GetAuthAccount(ctx, "youtube", channelInfo.id)
+	if err != nil {
+		return fmt.Errorf("failed to check auth account: %w", err)
+	}
+
+	if authAccount != nil {
+		// Update existing account's token
+		err = s.userRepo.UpdateAuthTokens(ctx, authAccount.ID, googleToken, "")
+		if err != nil {
+			return fmt.Errorf("failed to update auth tokens: %w", err)
+		}
+	} else {
+		// Create new auth account linked to the current user
+		_, err = s.userRepo.CreateAuthAccount(ctx, userID, "youtube", channelInfo.id, googleToken, "")
+		if err != nil {
+			return fmt.Errorf("failed to create auth account: %w", err)
+		}
+	}
+
+	return nil
+}
+
+type youtubeChannelInfo struct {
+	id    string
+	title string
+}
+
+func (s *AuthService) exchangeGoogleCode(code string) (string, error) {
+	data := url.Values{
+		"client_id":     {s.config.GoogleClientID},
+		"client_secret": {s.config.GoogleClientSecret},
+		"code":          {code},
+		"grant_type":    {"authorization_code"},
+		"redirect_uri":  {s.config.FrontendURL + "/auth/youtube/callback"},
+	}
+
+	req, err := http.NewRequest("POST", "https://oauth2.googleapis.com/token", strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to exchange code: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	var tokenResp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+		TokenType    string `json:"token_type"`
+	}
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("empty access token from google: %s", string(body))
+	}
+
+	return tokenResp.AccessToken, nil
+}
+
+func (s *AuthService) getYouTubeChannelInfo(accessToken string) (*youtubeChannelInfo, error) {
+	req, err := http.NewRequest("GET", "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get youtube channel: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("youtube API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				Title string `json:"title"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode youtube channel: %w", err)
+	}
+
+	if len(result.Items) == 0 {
+		return nil, fmt.Errorf("no YouTube channel found for this Google account")
+	}
+
+	return &youtubeChannelInfo{
+		id:    result.Items[0].ID,
+		title: result.Items[0].Snippet.Title,
+	}, nil
+}
+
 func (s *AuthService) getGitHubUser(accessToken string) (*gitHubUser, error) {
 	req, err := http.NewRequest("GET", "https://api.github.com/user", nil)
 	if err != nil {

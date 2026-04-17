@@ -96,6 +96,7 @@ func main() {
 	// Provider registry
 	providerRegistry := provider.NewRegistry()
 	providerRegistry.Register(provider.NewGitHubProvider())
+	providerRegistry.Register(provider.NewYouTubeProvider())
 
 	// WebSocket hub
 	hub := ws.NewHub(logger)
@@ -128,6 +129,7 @@ func main() {
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/github", authHandler.GitHubLogin)
 			r.Post("/github/callback", authHandler.GitHubCallback)
+			r.Get("/youtube", authHandler.YouTubeLogin)
 			r.Post("/refresh", authHandler.RefreshToken)
 			r.Post("/logout", authHandler.Logout)
 
@@ -135,6 +137,7 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.AuthMiddleware(authService))
 				r.Get("/me", authHandler.Me)
+				r.Post("/youtube/callback", authHandler.YouTubeCallback)
 			})
 		})
 

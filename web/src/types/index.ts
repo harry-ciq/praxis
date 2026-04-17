@@ -89,7 +89,8 @@ export type AchievementType =
   | "WEEKLY_COMMITS"
   | "VIDEO_PUBLISHED"
   | "SUBSCRIBERS_MILESTONE"
-  | "VIEWS_MILESTONE";
+  | "VIEWS_MILESTONE"
+  | "CHANNEL_CREATED";
 
 export type Provider = "GITHUB" | "YOUTUBE";
 

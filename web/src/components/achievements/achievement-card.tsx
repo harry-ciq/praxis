@@ -14,6 +14,10 @@ import {
   Play,
   ArrowUpRight,
   ArchiveIcon,
+  Video,
+  Users,
+  Eye,
+  TvMinimalPlay,
 } from "lucide-react";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { ReactionBar } from "@/components/achievements/reaction-bar";
@@ -81,15 +85,22 @@ const ACHIEVEMENT_TYPE_CONFIG: Record<
     iconBg: "bg-red-500/10 text-red-400",
   },
   SUBSCRIBERS_MILESTONE: {
-    icon: Play,
+    icon: Users,
     label: "Subscribers Milestone",
-    badgeClass: "bg-red-500/10 text-red-400 border-red-500/20",
-    accentGradient: "from-red-500/20 via-transparent to-transparent",
-    iconBg: "bg-red-500/10 text-red-400",
+    badgeClass: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+    accentGradient: "from-rose-500/20 via-transparent to-transparent",
+    iconBg: "bg-rose-500/10 text-rose-400",
   },
   VIEWS_MILESTONE: {
-    icon: Play,
+    icon: Eye,
     label: "Views Milestone",
+    badgeClass: "bg-pink-500/10 text-pink-400 border-pink-500/20",
+    accentGradient: "from-pink-500/20 via-transparent to-transparent",
+    iconBg: "bg-pink-500/10 text-pink-400",
+  },
+  CHANNEL_CREATED: {
+    icon: TvMinimalPlay,
+    label: "Channel Created",
     badgeClass: "bg-red-500/10 text-red-400 border-red-500/20",
     accentGradient: "from-red-500/20 via-transparent to-transparent",
     iconBg: "bg-red-500/10 text-red-400",
@@ -103,7 +114,7 @@ const SOURCE_LABEL: Record<Provider, string> = {
 
 const SOURCE_ICON: Record<Provider, React.ElementType> = {
   GITHUB: GitFork,
-  YOUTUBE: Play,
+  YOUTUBE: Video,
 };
 
 interface AchievementCardProps {

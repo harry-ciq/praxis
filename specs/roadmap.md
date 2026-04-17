@@ -75,8 +75,11 @@ Phases are shippable slices — each one adds a working feature that can be test
 - Webhook endpoint (`POST /api/v1/webhooks/github`) for push-based events
 - Email notification worker (new follower, job match)
 
-## Phase 11 — Additional Providers **[NOT STARTED]**
-- YouTube provider: video milestones, subscriber counts, view achievements
+## Phase 11 — Additional Providers **[DONE]**
+- YouTube provider: video published, subscriber milestones, view milestones, channel created
+- Google OAuth flow for connecting YouTube accounts (separate from GitHub OAuth)
+- YouTube connect UI on settings page with OAuth redirect flow
+- Achievement cards with distinct icons for each YouTube achievement type
 - Provider registry is already extensible — add new providers by implementing the interface
 - Per-provider sync settings in user profile
 

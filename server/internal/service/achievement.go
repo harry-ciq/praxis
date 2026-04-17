@@ -104,6 +104,8 @@ func (s *AchievementService) SyncProvider(ctx context.Context, userID, providerN
 	archivablePrefixes := []string{
 		strings.ToLower(providerName) + ":repo:",
 		strings.ToLower(providerName) + ":stars:",
+		strings.ToLower(providerName) + ":channel:",
+		strings.ToLower(providerName) + ":video:",
 	}
 
 	for _, prefix := range archivablePrefixes {
