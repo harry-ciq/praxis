@@ -92,11 +92,11 @@ Phases are shippable slices — each one adds a working feature that can be test
 - SEO metadata: title template, description, keywords, Open Graph, Twitter Card, robots
 - Responsive audit + per-route error boundaries deferred to follow-up
 
-## Phase 13 — Messaging Enhancements **[NOT STARTED]**
-- Typing indicators (server-side handling exists, needs frontend UI)
-- Read receipts (last_read_at tracked, needs visual indicator)
-- Message search
-- Media uploads (images, files) via MinIO/S3
+## Phase 13 — Messaging Enhancements **[DONE]**
+- Typing indicators: throttled `typing` ws message from frontend, "<name> is typing…" UI in chat thread
+- Message search: `GET /api/v1/conversations/search?q=` (case-insensitive ILIKE) with search bar in conversation list
+- Read times API: `GET /api/v1/conversations/{id}/read-times` returns last_read_at per participant
+- Media uploads (MinIO/S3) deferred — needs object-storage infrastructure
 
 ## Phase 14 — Testing & CI **[NOT STARTED]**
 - Go unit tests with testify (services, handlers)

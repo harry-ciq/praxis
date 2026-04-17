@@ -35,6 +35,11 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
   // so we don't fight with React Query's reference identity
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
 
+  // Typing indicator state — set when other user is typing, auto-clears
+  const [otherTyping, setOtherTyping] = useState(false);
+  const typingClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSentRef = useRef<number>(0);
+
   // Fetch conversations list to get participant info
   const { data: conversations } = useQuery({
     queryKey: ["conversations"],
@@ -121,11 +126,30 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
 
+    const unsubTyping = socket.on("typing", (data) => {
+      const t = data as { conversationId: string; userId: string };
+      if (t.conversationId !== conversationId) return;
+      if (t.userId === user?.id) return; // ignore our own
+      setOtherTyping(true);
+      if (typingClearRef.current) clearTimeout(typingClearRef.current);
+      typingClearRef.current = setTimeout(() => setOtherTyping(false), 3000);
+    });
+
     return () => {
       unsubMessage();
       unsubDeleted();
+      unsubTyping();
+      if (typingClearRef.current) clearTimeout(typingClearRef.current);
     };
-  }, [conversationId, queryClient]);
+  }, [conversationId, queryClient, user?.id]);
+
+  // Send a typing event when the user types (throttled to once per 2s)
+  const sendTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTypingSentRef.current < 2000) return;
+    lastTypingSentRef.current = now;
+    socket.sendRaw({ type: "typing", conversationId });
+  }, [conversationId]);
 
   // Auto-scroll to bottom when message count changes
   const messageCount = messages.length;
@@ -278,12 +302,23 @@ export function ChatThread({ conversationId }: ChatThreadProps) {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Typing indicator */}
+      {otherTyping && otherParticipant && (
+        <div className="px-4 pb-1 text-xs text-zinc-500">
+          {otherParticipant.name} is typing
+          <span className="ml-1 inline-block animate-pulse">…</span>
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t border-zinc-800 px-4 py-3">
         <div className="flex items-center gap-2">
           <Input
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
+            onChange={(e) => {
+              setNewMessage(e.target.value);
+              if (e.target.value) sendTyping();
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             className="flex-1 border-zinc-700 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500"

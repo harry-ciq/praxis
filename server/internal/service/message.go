@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -213,6 +214,29 @@ func (s *MessageService) DeleteConversation(ctx context.Context, conversationID,
 }
 
 // MarkRead marks a conversation as read for the user.
+// SearchMessages searches the user's messages by content.
+func (s *MessageService) SearchMessages(ctx context.Context, userID, query string, limit int) ([]repository.MessageSearchResult, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.messageRepo.SearchMessages(ctx, userID, query, limit)
+}
+
+// GetReadTimes returns the read timestamp per participant for a conversation.
+func (s *MessageService) GetReadTimes(ctx context.Context, conversationID, userID string) (map[string]*time.Time, error) {
+	isParticipant, err := s.messageRepo.IsParticipant(ctx, conversationID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !isParticipant {
+		return nil, ErrNotParticipant
+	}
+	return s.messageRepo.GetParticipantReadTimes(ctx, conversationID)
+}
+
 func (s *MessageService) MarkRead(ctx context.Context, conversationID, userID string) error {
 	isParticipant, err := s.messageRepo.IsParticipant(ctx, conversationID, userID)
 	if err != nil {

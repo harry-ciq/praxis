@@ -218,10 +218,12 @@ func main() {
 			r.Route("/conversations", func(r chi.Router) {
 				r.Get("/", messageHandler.ListConversations)
 				r.Post("/", messageHandler.CreateConversation)
+				r.Get("/search", messageHandler.SearchMessages)
 				r.Delete("/{id}", messageHandler.DeleteConversation)
 				r.Get("/{id}/messages", messageHandler.ListMessages)
 				r.Post("/{id}/messages", messageHandler.SendMessage)
 				r.Delete("/{id}/messages/{messageId}", messageHandler.DeleteMessage)
+				r.Get("/{id}/read-times", messageHandler.GetReadTimes)
 				r.Patch("/{id}/read", messageHandler.MarkRead)
 			})
 		})

@@ -130,6 +130,14 @@ class SocketClient {
     }
   }
 
+  /** Send a flat object (used for protocol messages like typing indicators
+   * where the server expects sibling fields, not a nested data field). */
+  sendRaw(payload: Record<string, unknown>) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(payload));
+    }
+  }
+
   /** Check current connection state (for debugging) */
   get state(): string {
     if (!this.ws) return "NONE";

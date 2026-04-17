@@ -176,6 +176,85 @@ func (r *MessageRepo) ListMessages(ctx context.Context, conversationID string, l
 	return messages, rows.Err()
 }
 
+// MessageSearchResult is a message search result with conversation participant info.
+type MessageSearchResult struct {
+	Message
+	OtherParticipantUsername string `json:"otherParticipantUsername"`
+	OtherParticipantName     string `json:"otherParticipantName"`
+	OtherParticipantAvatar   string `json:"otherParticipantAvatar"`
+}
+
+// SearchMessages returns messages across all conversations the user is in
+// whose content contains the query (case-insensitive).
+func (r *MessageRepo) SearchMessages(ctx context.Context, userID, query string, limit int) ([]MessageSearchResult, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT
+			m.id, m.conversation_id, m.sender_id, m.content, m.created_at,
+			COALESCE(other.username, '') AS other_username,
+			COALESCE(other.name, '') AS other_name,
+			COALESCE(other.avatar_url, '') AS other_avatar
+		 FROM messages m
+		 JOIN conversation_participants cp ON cp.conversation_id = m.conversation_id AND cp.user_id = $1
+		 LEFT JOIN LATERAL (
+			SELECT u.username, u.name, u.avatar_url
+			FROM conversation_participants cp2
+			JOIN users u ON u.id = cp2.user_id
+			WHERE cp2.conversation_id = m.conversation_id AND cp2.user_id != $1
+			LIMIT 1
+		 ) AS other ON true
+		 WHERE m.content ILIKE '%' || $2 || '%'
+		 ORDER BY m.created_at DESC
+		 LIMIT $3`,
+		userID, query, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []MessageSearchResult
+	for rows.Next() {
+		var r MessageSearchResult
+		if err := rows.Scan(&r.ID, &r.ConversationID, &r.SenderID, &r.Content, &r.CreatedAt,
+			&r.OtherParticipantUsername, &r.OtherParticipantName, &r.OtherParticipantAvatar); err != nil {
+			return nil, err
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if results == nil {
+		results = []MessageSearchResult{}
+	}
+	return results, nil
+}
+
+// GetParticipantReadTimes returns each participant's last_read_at timestamp.
+// Used to compute read receipts.
+func (r *MessageRepo) GetParticipantReadTimes(ctx context.Context, conversationID string) (map[string]*time.Time, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT user_id, last_read_at FROM conversation_participants
+		 WHERE conversation_id = $1`,
+		conversationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string]*time.Time)
+	for rows.Next() {
+		var uid string
+		var ts *time.Time
+		if err := rows.Scan(&uid, &ts); err != nil {
+			return nil, err
+		}
+		out[uid] = ts
+	}
+	return out, rows.Err()
+}
+
 func (r *MessageRepo) UpdateConversationTimestamp(ctx context.Context, conversationID string) error {
 	_, err := r.pool.Exec(ctx,
 		`UPDATE conversations SET updated_at = NOW() WHERE id = $1`,

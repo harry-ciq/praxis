@@ -15,9 +15,20 @@ import {
 } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageSquarePlus, Search, X, Loader2 } from "lucide-react";
+import { MessageSquarePlus, Search, X, Loader2, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import type { Conversation } from "@/types";
+
+interface MessageSearchResult {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  createdAt: string;
+  otherParticipantUsername: string;
+  otherParticipantName: string;
+  otherParticipantAvatar: string;
+}
 
 interface ConversationListProps {
   activeId?: string;
@@ -28,6 +39,7 @@ export function ConversationList({ activeId }: ConversationListProps) {
   const router = useRouter();
   const [showNewChat, setShowNewChat] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [messageSearchQuery, setMessageSearchQuery] = useState("");
   const [creating, setCreating] = useState(false);
 
   const { data: conversations = [] } = useQuery({
@@ -37,6 +49,16 @@ export function ConversationList({ activeId }: ConversationListProps) {
 
   const { data: searchResults, isLoading: searching } =
     useSearchUsers(searchQuery);
+
+  // Message content search
+  const { data: messageResults = [] } = useQuery({
+    queryKey: ["message-search", messageSearchQuery],
+    queryFn: () =>
+      api.get<MessageSearchResult[]>("/conversations/search", {
+        q: messageSearchQuery,
+      }),
+    enabled: messageSearchQuery.trim().length >= 2,
+  });
 
   function getOtherParticipant(conversation: Conversation) {
     return (
@@ -143,6 +165,54 @@ export function ConversationList({ activeId }: ConversationListProps) {
                     </button>
                   ))
               )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Message search */}
+      {!showNewChat && (
+        <div className="border-b border-zinc-800 px-3 py-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+            <Input
+              placeholder="Search messages..."
+              value={messageSearchQuery}
+              onChange={(e) => setMessageSearchQuery(e.target.value)}
+              className="h-8 border-zinc-700 bg-zinc-900 pl-8 text-sm text-zinc-200 placeholder:text-zinc-500"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Message search results */}
+      {!showNewChat && messageSearchQuery.trim().length >= 2 && (
+        <div className="border-b border-zinc-800">
+          <div className="px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+            {messageResults.length} match{messageResults.length === 1 ? "" : "es"}
+          </div>
+          {messageResults.length === 0 ? (
+            <p className="px-4 py-3 text-xs text-zinc-500">No messages match.</p>
+          ) : (
+            <div className="max-h-60 overflow-y-auto">
+              {messageResults.map((m) => (
+                <Link
+                  key={m.id}
+                  href={`/messages/${m.conversationId}`}
+                  className="flex items-start gap-2.5 px-4 py-2 transition-colors hover:bg-zinc-800/50"
+                >
+                  <MessageSquare className="mt-0.5 size-3.5 shrink-0 text-zinc-500" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs text-zinc-300">
+                      {m.content}
+                    </p>
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-500">
+                      with {m.otherParticipantName || "unknown"} ·{" "}
+                      {formatRelativeTime(m.createdAt)}
+                    </p>
+                  </div>
+                </Link>
+              ))}
             </div>
           )}
         </div>

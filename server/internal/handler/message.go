@@ -226,6 +226,57 @@ func (h *MessageHandler) DeleteMessage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// SearchMessages searches all the user's messages by content.
+// GET /api/v1/conversations/search?q=
+func (h *MessageHandler) SearchMessages(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	query := r.URL.Query().Get("q")
+	if query == "" {
+		writeJSON(w, http.StatusOK, []repository.MessageSearchResult{})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	results, err := h.messageService.SearchMessages(r.Context(), claims.UserID, query, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "search failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, results)
+}
+
+// GetReadTimes returns last_read_at per participant for a conversation.
+// GET /api/v1/conversations/{id}/read-times
+func (h *MessageHandler) GetReadTimes(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	conversationID := chi.URLParam(r, "id")
+	if conversationID == "" {
+		writeError(w, http.StatusBadRequest, "conversation id is required")
+		return
+	}
+
+	times, err := h.messageService.GetReadTimes(r.Context(), conversationID, claims.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotParticipant) {
+			writeError(w, http.StatusForbidden, "not a participant")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to get read times")
+		return
+	}
+	writeJSON(w, http.StatusOK, times)
+}
+
 // DeleteConversation deletes a conversation and all its messages.
 // DELETE /api/v1/conversations/{id}
 func (h *MessageHandler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
