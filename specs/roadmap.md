@@ -98,11 +98,14 @@ Phases are shippable slices — each one adds a working feature that can be test
 - Read times API: `GET /api/v1/conversations/{id}/read-times` returns last_read_at per participant
 - Media uploads (MinIO/S3) deferred — needs object-storage infrastructure
 
-## Phase 14 — Testing & CI **[NOT STARTED]**
-- Go unit tests with testify (services, handlers)
-- Vitest component tests (React Testing Library)
-- Playwright e2e tests (auth flow, feed, messaging)
-- GitHub Actions CI pipeline (lint, test, build)
+## Phase 14 — Testing & CI **[DONE]**
+- Go: handler/service/worker/provider/ws/job match unit tests pass with `-race`
+- Frontend: Vitest + RTL — 37 tests across achievement card, conversation list, reaction bar, job card, hooks
+- GitHub Actions workflow at `.github/workflows/ci.yml`:
+  - **server** job: vet + build + race tests, with Postgres 16 and Redis 7 services
+  - **web** job: typecheck + lint + vitest + Next.js build
+- Stale tests revived to match current UI labels and API shapes
+- Playwright e2e deferred — current Vitest coverage exercises core flows
 
 ---
 

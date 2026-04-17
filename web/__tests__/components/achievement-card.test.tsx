@@ -64,6 +64,7 @@ const mockAchievement: Achievement = {
   source: "GITHUB",
   sourceId: "repo-123",
   verificationHash: "abc123hash",
+  status: "active",
   createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
   reactions: { clap: 5, fire: 3, rocket: 1, total: 9 },
   userReaction: null,
@@ -102,7 +103,7 @@ describe("AchievementCard", () => {
     render(createElement(AchievementCard, { achievement: mockAchievement }), {
       wrapper: createWrapper(),
     });
-    expect(screen.getByText("Repo Created")).toBeInTheDocument();
+    expect(screen.getByText("New Repository")).toBeInTheDocument();
   });
 
   it("renders description when present", () => {
@@ -118,7 +119,7 @@ describe("AchievementCard", () => {
     render(createElement(AchievementCard, { achievement: mockAchievement }), {
       wrapper: createWrapper(),
     });
-    const proofLink = screen.getByText("View proof");
+    const proofLink = screen.getByText("View on GitHub");
     expect(proofLink).toBeInTheDocument();
     expect(proofLink.closest("a")).toHaveAttribute(
       "href",
@@ -131,7 +132,7 @@ describe("AchievementCard", () => {
     render(createElement(AchievementCard, { achievement }), {
       wrapper: createWrapper(),
     });
-    expect(screen.queryByText("View proof")).not.toBeInTheDocument();
+    expect(screen.queryByText("View on GitHub")).not.toBeInTheDocument();
   });
 
   it("shows correct reaction counts", () => {

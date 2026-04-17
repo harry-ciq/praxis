@@ -63,13 +63,9 @@ vi.mock("@/lib/api-client", () => ({
             avatarUrl: "https://example.com/jane.jpg",
           },
         ],
-        lastMessage: {
-          id: "msg-1",
-          conversationId: "conv-1",
-          senderId: "user-2",
-          content: "Hey, I saw your latest project. It looks amazing!",
-          createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-        },
+        lastMessageContent: "Hey, that looks amazing!",
+        lastMessageSenderId: "user-2",
+        lastMessageAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
         unreadCount: 2,
         updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
       },
@@ -84,7 +80,9 @@ vi.mock("@/lib/api-client", () => ({
             avatarUrl: null,
           },
         ],
-        lastMessage: null,
+        lastMessageContent: null,
+        lastMessageSenderId: null,
+        lastMessageAt: null,
         unreadCount: 0,
         updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       },
@@ -130,7 +128,7 @@ describe("ConversationList", () => {
       wrapper: createWrapper(),
     });
     expect(
-      await screen.findByText("Hey, I saw your latest project. It looks amazing!"),
+      await screen.findByText("Hey, that looks amazing!"),
     ).toBeInTheDocument();
   });
 
@@ -138,7 +136,9 @@ describe("ConversationList", () => {
     render(createElement(ConversationList), {
       wrapper: createWrapper(),
     });
-    expect(await screen.findByText("No messages yet")).toBeInTheDocument();
+    // Wait for Bob Smith's row, which has no messages, then assert placeholder
+    await screen.findByText("Bob Smith");
+    expect(screen.getAllByText("No messages yet").length).toBeGreaterThan(0);
   });
 
   it("renders the Messages heading", () => {

@@ -79,7 +79,8 @@ describe("ReactionBar", () => {
     );
 
     const fireButton = screen.getByLabelText("Fire (5)");
-    expect(fireButton.className).toContain("bg-zinc-700");
+    // Active reaction is highlighted in orange (its activeClass)
+    expect(fireButton.className).toContain("orange");
   });
 
   it("calls API when clicking a reaction", async () => {

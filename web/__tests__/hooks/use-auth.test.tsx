@@ -94,8 +94,10 @@ describe("useAuth", () => {
 
   it("handleCallback exchanges code for tokens and sets user", async () => {
     const callbackResponse = {
-      accessToken: "access-123",
-      refreshToken: "refresh-123",
+      tokens: {
+        accessToken: "access-123",
+        refreshToken: "refresh-123",
+      },
       user: {
         id: "1",
         username: "testuser",
@@ -105,7 +107,9 @@ describe("useAuth", () => {
         headline: null,
       },
     };
+    // First call is the auto-sync after login (POST /achievements/sync), then handleCallback
     mockPost.mockResolvedValueOnce(callbackResponse);
+    mockPost.mockResolvedValueOnce({ newAchievements: 0 });
 
     const { result } = renderHook(() => useAuth(), { wrapper });
 
