@@ -53,8 +53,11 @@ export function useFollow() {
 
   const follow = useMutation({
     mutationFn: (username: string) => api.post(`/users/${username}/follow`),
-    onSuccess: (_data, username) => {
-      queryClient.invalidateQueries({ queryKey: ["profile", username] });
+    onSuccess: () => {
+      // Both the target user's and the viewer's profile counts change,
+      // so invalidate all profile queries.
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["my-profile"] });
       queryClient.invalidateQueries({ queryKey: ["followers"] });
       queryClient.invalidateQueries({ queryKey: ["following"] });
       queryClient.invalidateQueries({ queryKey: ["feed"] });
@@ -65,8 +68,9 @@ export function useFollow() {
   const unfollow = useMutation({
     mutationFn: (username: string) =>
       api.delete(`/users/${username}/follow`),
-    onSuccess: (_data, username) => {
-      queryClient.invalidateQueries({ queryKey: ["profile", username] });
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["profile"] });
+      queryClient.invalidateQueries({ queryKey: ["my-profile"] });
       queryClient.invalidateQueries({ queryKey: ["followers"] });
       queryClient.invalidateQueries({ queryKey: ["following"] });
       queryClient.invalidateQueries({ queryKey: ["feed"] });

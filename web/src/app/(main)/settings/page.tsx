@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
-import { Code2, Loader2, CheckCircle2, Link2, Video, RefreshCw } from "lucide-react";
+import { Code2, Loader2, CheckCircle2, Link2, Video } from "lucide-react";
 import type { UserProfile } from "@/types";
 
 export default function SettingsPage() {
@@ -36,7 +36,7 @@ export default function SettingsPage() {
   });
 
   // Fetch full profile (including connected providers) for the current user
-  const { data: profile, refetch: refetchProfile } = useQuery({
+  const { data: profile } = useQuery({
     queryKey: ["my-profile", user?.username],
     queryFn: () =>
       api.get<UserProfile>(`/users/${user!.username}`),
@@ -59,14 +59,6 @@ export default function SettingsPage() {
       setYoutubeConnecting(false);
     }
   };
-
-  const syncMutation = useMutation({
-    mutationFn: (provider: string) =>
-      api.post<{ newAchievements: number }>("/achievements/sync", { provider }),
-    onSuccess: () => {
-      refetchProfile();
-    },
-  });
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
@@ -204,23 +196,12 @@ export default function SettingsPage() {
             </div>
             {youtubeConnected ? (
               <Button
-                onClick={() => syncMutation.mutate("YOUTUBE")}
-                disabled={syncMutation.isPending}
-                size="sm"
                 variant="outline"
+                size="sm"
                 className="border-zinc-700 text-zinc-300"
               >
-                {syncMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                    Syncing...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-1.5 size-3.5" />
-                    Sync
-                  </>
-                )}
+                <Link2 className="mr-1.5 size-3.5" />
+                Disconnect
               </Button>
             ) : (
               <Button
