@@ -8,8 +8,10 @@ import (
 )
 
 func init() {
-	// Load .env file if present (silently ignore if missing)
-	godotenv.Load()
+	// Load .env if present. Use Overload so the file wins over any pre-existing
+	// shell env vars — common gotcha when launching from IDEs or desktop apps
+	// that export their own empty defaults (e.g. ANTHROPIC_API_KEY="").
+	_ = godotenv.Overload()
 }
 
 type Config struct {
