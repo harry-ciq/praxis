@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,10 +31,22 @@ type SmartFeedGroup struct {
 	Theme  string `json:"theme"` // SHIPPING | CONTENT | MILESTONE | COMMUNITY | LEARNING | OTHER
 }
 
-// SmartFeedAction is a single suggested next step.
+// SmartFeedAction is a single suggested next step. When Href is set, the
+// frontend renders the CTA as a link; otherwise as an advisory button.
 type SmartFeedAction struct {
 	Label string `json:"label"` // short description of the action
 	CTA   string `json:"cta"`   // button text (e.g., "View", "React", "Follow up")
+	Href  string `json:"href"`  // resolved URL (e.g., /profile/harry329). "" = no nav.
+}
+
+// FeaturedPerson is one of the people whose activity appears in this digest.
+// Rendered as a small avatar chip at the top of the hero card.
+type FeaturedPerson struct {
+	Username  string `json:"username"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl"`
+	IsMe      bool   `json:"isMe"`
+	Count     int    `json:"count"` // how many items in this digest are theirs
 }
 
 // SmartFeedDigest is the structured response the frontend consumes.
@@ -54,6 +67,16 @@ type SmartFeedDigest struct {
 	Groups []SmartFeedGroup `json:"groups"`
 	// SuggestedAction is one specific next step the viewer could take, or nil.
 	SuggestedAction *SmartFeedAction `json:"suggestedAction,omitempty"`
+	// FeaturedPeople are the unique authors in this digest, sorted by count desc.
+	// Rendered as a small avatar row.
+	FeaturedPeople []FeaturedPerson `json:"featuredPeople"`
+	// MyShare / FollowedShare are integer percentages that sum to 100.
+	// Drives the "your vs. people you follow" split bar.
+	MyShare       int `json:"myShare"`
+	FollowedShare int `json:"followedShare"`
+	// ActivityByDay is a 7-entry array of event counts, oldest-first.
+	// Drives the 7-day activity heat strip.
+	ActivityByDay []int `json:"activityByDay"`
 
 	SourceCount int       `json:"sourceCount"`
 	GeneratedAt time.Time `json:"generatedAt"`
@@ -182,7 +205,8 @@ Produce a JSON object with exactly these fields:
   ],
   "suggestedAction": {
     "label": "ONE specific, low-friction thing the viewer could do next. Examples: 'React to Harry's new video', 'Message Sarah about her ML pipeline', 'Keep your 3-week shipping streak alive'. Under 70 chars.",
-    "cta": "Short button text: React | View | Follow up | Keep going | Explore"
+    "cta": "Short button text: React | View | Follow up | Keep going | Explore",
+    "targetUsername": "The @username of the person the action refers to, copied from a feed item. MUST be exactly one of the usernames that appears in the feed items. Use empty string if the action is self-directed (about the viewer's own work)."
   }
 }
 
@@ -256,7 +280,11 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 		Summary         string           `json:"summary"`
 		Highlight       string           `json:"highlight"`
 		Groups          []SmartFeedGroup `json:"groups"`
-		SuggestedAction *SmartFeedAction `json:"suggestedAction"`
+		SuggestedAction *struct {
+			Label          string `json:"label"`
+			CTA            string `json:"cta"`
+			TargetUsername string `json:"targetUsername"`
+		} `json:"suggestedAction"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		s.logger.Warn("smart feed: failed to parse LLM output as JSON",
@@ -269,7 +297,6 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	if parsed.Groups == nil {
 		parsed.Groups = []SmartFeedGroup{}
 	}
-	// Normalise theme tags to the vocabulary the frontend knows
 	for i := range parsed.Groups {
 		parsed.Groups[i].Theme = normaliseTheme(parsed.Groups[i].Theme)
 	}
@@ -278,9 +305,27 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	}
 	parsed.Vibe = normaliseVibe(parsed.Vibe)
 
-	// Drop empty suggestedAction blocks
-	if parsed.SuggestedAction != nil && parsed.SuggestedAction.Label == "" {
-		parsed.SuggestedAction = nil
+	// Build featured-people and counts from the raw feed (not the LLM) so we
+	// can trust the data. Sort by count descending, cap at 5.
+	featured, myShare, followedShare := buildFeaturedPeople(viewer, achievements)
+
+	// Resolve the suggested action's href. Only accept usernames Claude could
+	// have seen — if it hallucinated a name, drop the href.
+	var action *SmartFeedAction
+	if parsed.SuggestedAction != nil && parsed.SuggestedAction.Label != "" {
+		action = &SmartFeedAction{
+			Label: parsed.SuggestedAction.Label,
+			CTA:   parsed.SuggestedAction.CTA,
+		}
+		if u := strings.TrimPrefix(parsed.SuggestedAction.TargetUsername, "@"); u != "" {
+			validUsernames := map[string]bool{viewer.Username: true}
+			for _, a := range achievements {
+				validUsernames[a.UserUsername] = true
+			}
+			if validUsernames[u] {
+				action.Href = "/profile/" + u
+			}
+		}
 	}
 
 	return &SmartFeedDigest{
@@ -290,10 +335,95 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 		Summary:         parsed.Summary,
 		Highlight:       parsed.Highlight,
 		Groups:          parsed.Groups,
-		SuggestedAction: parsed.SuggestedAction,
+		SuggestedAction: action,
+		FeaturedPeople:  featured,
+		MyShare:         myShare,
+		FollowedShare:   followedShare,
+		ActivityByDay:   buildActivityByDay(achievements),
 		SourceCount:     len(achievements),
 		GeneratedAt:     time.Now(),
 	}, nil
+}
+
+// buildFeaturedPeople returns unique authors in this digest sorted by count
+// descending (max 5), plus the viewer's share of total items as an integer
+// percentage. The viewer is always included first if they have any items.
+func buildFeaturedPeople(viewer *repository.User, achievements []repository.AchievementWithUser) (featured []FeaturedPerson, myShare, followedShare int) {
+	type bucket struct {
+		Username  string
+		Name      string
+		AvatarURL string
+		IsMe      bool
+		Count     int
+	}
+	byUser := make(map[string]*bucket)
+	myCount := 0
+	for _, a := range achievements {
+		b, ok := byUser[a.UserUsername]
+		if !ok {
+			b = &bucket{
+				Username:  a.UserUsername,
+				Name:      a.UserName,
+				AvatarURL: a.UserAvatarURL,
+				IsMe:      a.UserID == viewer.ID,
+			}
+			byUser[a.UserUsername] = b
+		}
+		b.Count++
+		if b.IsMe {
+			myCount++
+		}
+	}
+
+	total := len(achievements)
+	if total > 0 {
+		myShare = (myCount * 100) / total
+		followedShare = 100 - myShare
+	}
+
+	buckets := make([]*bucket, 0, len(byUser))
+	for _, b := range byUser {
+		buckets = append(buckets, b)
+	}
+	// Viewer first, then by count descending
+	sort.SliceStable(buckets, func(i, j int) bool {
+		if buckets[i].IsMe != buckets[j].IsMe {
+			return buckets[i].IsMe
+		}
+		return buckets[i].Count > buckets[j].Count
+	})
+	if len(buckets) > 5 {
+		buckets = buckets[:5]
+	}
+
+	featured = make([]FeaturedPerson, 0, len(buckets))
+	for _, b := range buckets {
+		featured = append(featured, FeaturedPerson{
+			Username: b.Username, Name: b.Name, AvatarURL: b.AvatarURL,
+			IsMe: b.IsMe, Count: b.Count,
+		})
+	}
+	return featured, myShare, followedShare
+}
+
+// buildActivityByDay returns a 7-entry array of event counts, oldest bucket
+// first (6 days ago) to newest (today). Items older than 7 days are folded
+// into the first bucket so long-tail portfolios still register.
+func buildActivityByDay(achievements []repository.AchievementWithUser) []int {
+	out := make([]int, 7)
+	today := time.Now().Truncate(24 * time.Hour)
+	for _, a := range achievements {
+		daysAgo := int(today.Sub(a.CreatedAt.Truncate(24 * time.Hour)).Hours() / 24)
+		switch {
+		case daysAgo < 0:
+			daysAgo = 0
+		case daysAgo > 6:
+			daysAgo = 6
+		}
+		bucket := 6 - daysAgo // oldest first
+		out[bucket]++
+	}
+	return out
 }
 
 // computeTimeframe returns a short phrase describing the digest window.
