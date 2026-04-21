@@ -138,3 +138,31 @@
   animation: smart-feed-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(var(--stagger, 0) * 70ms);
 }
+
+/* Shimmer sweep used while the smart feed regenerates. */
+@keyframes smart-feed-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.smart-feed-shimmer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.smart-feed-shimmer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(251, 191, 36, 0.08) 50%,
+    transparent 100%
+  );
+  animation: smart-feed-shimmer 1.4s ease-in-out infinite;
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -14,12 +15,12 @@ import {
   RotateCw,
   AlertCircle,
   Rss,
-  Star,
   ArrowRight,
 } from "lucide-react";
 import { formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 // --- Types ---------------------------------------------------------------
 
@@ -43,7 +44,7 @@ interface SmartFeedGroup {
 interface SmartFeedAction {
   label: string;
   cta: string;
-  href: string; // "" when no navigation target
+  href: string;
 }
 
 interface FeaturedPerson {
@@ -54,8 +55,14 @@ interface FeaturedPerson {
   count: number;
 }
 
+interface HeroStat {
+  value: string;
+  label: string;
+}
+
 interface SmartFeedDigest {
   vibe: Vibe;
+  heroStat: HeroStat | null;
   timeframe: string;
   headline: string;
   summary: string;
@@ -133,6 +140,8 @@ const THEME_LABEL_STYLE: Record<GroupTheme, string> = {
   OTHER: "text-zinc-400",
 };
 
+// --- Helpers -------------------------------------------------------------
+
 function getInitials(name: string) {
   return name
     .split(" ")
@@ -141,6 +150,214 @@ function getInitials(name: string) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
+}
+
+// ISO week-of-year number. Used as the "issue number" of the digest.
+function getISOWeek(d: Date) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil(((+date - +yearStart) / 86400000 + 1) / 7);
+}
+
+// Count up an integer from 0 to `target` over `duration` ms (ease-out cubic).
+// Uses setInterval (not RAF) so it keeps ticking even if the tab is
+// backgrounded or the embedding iframe throttles rAF. 60 ticks / sec is
+// plenty for a 1.1s animation.
+function useCountUp(target: number, duration = 1100) {
+  const [value, setValue] = useState(0);
+  useEffect(() => {
+    if (target <= 0) {
+      setValue(0);
+      return;
+    }
+    const stepMs = 16;
+    const start = Date.now();
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const progress = Math.min(1, elapsed / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(eased * target));
+      if (progress >= 1) clearInterval(id);
+    }, stepMs);
+    return () => clearInterval(id);
+  }, [target, duration]);
+  return value;
+}
+
+// Render a hero stat value like "17" with count-up, "1.2K" verbatim, "50+" too.
+function HeroStatValue({ raw }: { raw: string }) {
+  // Extract a leading integer if present (e.g. "17", "17 commits", "17+")
+  const m = raw.match(/^(\d+)([^\d]*)$/);
+  const target = m ? parseInt(m[1], 10) : 0;
+  const suffix = m ? m[2] : "";
+  const animated = useCountUp(target);
+  if (m && target > 0) {
+    return (
+      <>
+        <span className="tabular-nums">{animated}</span>
+        {suffix && <span>{suffix}</span>}
+      </>
+    );
+  }
+  // Fallback for non-integer values like "1.2K"
+  return <span>{raw}</span>;
+}
+
+// Split text on occurrences of any `name`-like strings from featuredPeople,
+// yielding a mix of plain text and avatar chips. Matches whole words only and
+// supports possessive forms like "Harry's".
+function renderProseWithAvatars(
+  text: string,
+  people: FeaturedPerson[]
+): ReactNode[] {
+  if (!text || people.length === 0) return [text];
+
+  // Build unique lowercase name tokens, longest first so "harry-ciq" is
+  // matched before "harry".
+  const tokens = new Map<string, FeaturedPerson>();
+  for (const p of people) {
+    if (p.username) tokens.set(p.username.toLowerCase(), p);
+    if (p.name) {
+      tokens.set(p.name.toLowerCase(), p);
+      const first = p.name.split(" ")[0];
+      if (first) tokens.set(first.toLowerCase(), p);
+    }
+  }
+  const sortedKeys = Array.from(tokens.keys()).sort(
+    (a, b) => b.length - a.length
+  );
+  if (sortedKeys.length === 0) return [text];
+
+  // Escape regex metachars and allow an optional possessive ('s)
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(
+    `\\b(@?(?:${sortedKeys.map(esc).join("|")}))(['’]s)?\\b`,
+    "gi"
+  );
+
+  const out: ReactNode[] = [];
+  let lastIdx = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const start = match.index;
+    const raw = match[0];
+    const nameToken = match[1].replace(/^@/, "").toLowerCase();
+    const possessive = match[2] ?? "";
+    const person = tokens.get(nameToken);
+    if (!person) continue;
+
+    if (start > lastIdx) out.push(text.slice(lastIdx, start));
+    out.push(
+      <InlineAvatarChip
+        key={`chip-${key++}`}
+        person={person}
+        label={raw.replace(/['’]s$/, "")}
+      />
+    );
+    if (possessive) out.push(possessive);
+    lastIdx = start + raw.length;
+  }
+  if (lastIdx < text.length) out.push(text.slice(lastIdx));
+  return out;
+}
+
+function InlineAvatarChip({
+  person,
+  label,
+}: {
+  person: FeaturedPerson;
+  label: string;
+}) {
+  return (
+    <Link
+      href={`/profile/${person.username}`}
+      className="inline-flex items-center gap-1 rounded-full bg-zinc-800/70 px-1.5 py-0.5 align-middle text-[12.5px] font-medium text-zinc-100 ring-1 ring-inset ring-zinc-700/50 transition-colors hover:bg-zinc-700/70 hover:ring-zinc-600"
+    >
+      <Avatar size="sm" className="size-4">
+        {person.avatarUrl ? (
+          <AvatarImage src={person.avatarUrl} alt={person.name} />
+        ) : null}
+        <AvatarFallback className="bg-zinc-700 text-[8px]">
+          {getInitials(person.name)}
+        </AvatarFallback>
+      </Avatar>
+      {label}
+    </Link>
+  );
+}
+
+// SVG sparkline for the activityByDay array. Amber stroke + faint area fill.
+// Annotates today and the peak day.
+function Sparkline({ data }: { data: number[] }) {
+  const width = 120;
+  const height = 40;
+  const padding = 3;
+  const max = Math.max(1, ...data);
+  const stepX =
+    data.length > 1 ? (width - 2 * padding) / (data.length - 1) : 0;
+  const yFor = (v: number) =>
+    height - padding - (v / max) * (height - 2 * padding);
+
+  const points = data.map((v, i) => [padding + i * stepX, yFor(v)] as const);
+  const linePath = points
+    .map(([x, y], i) => (i === 0 ? `M${x},${y}` : `L${x},${y}`))
+    .join(" ");
+  const areaPath = `${linePath} L${points[points.length - 1][0]},${
+    height - padding
+  } L${points[0][0]},${height - padding} Z`;
+
+  const peakIdx = data.reduce(
+    (acc, v, i) => (v > data[acc] ? i : acc),
+    0
+  );
+  const todayIdx = data.length - 1;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      className="overflow-visible"
+      aria-label="7-day activity"
+    >
+      <defs>
+        <linearGradient id="sf-spark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="rgb(251 191 36)" stopOpacity="0.35" />
+          <stop offset="100%" stopColor="rgb(251 191 36)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill="url(#sf-spark)" />
+      <path
+        d={linePath}
+        fill="none"
+        stroke="rgb(251 191 36)"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Peak dot */}
+      {data[peakIdx] > 0 && (
+        <circle
+          cx={points[peakIdx][0]}
+          cy={points[peakIdx][1]}
+          r="2.5"
+          fill="rgb(251 191 36)"
+        />
+      )}
+      {/* Today dot */}
+      <circle
+        cx={points[todayIdx][0]}
+        cy={points[todayIdx][1]}
+        r="2.2"
+        fill="rgb(24 24 27)"
+        stroke="rgb(251 191 36)"
+        strokeWidth="1.3"
+      />
+    </svg>
+  );
 }
 
 // --- Component -----------------------------------------------------------
@@ -160,6 +377,7 @@ export function SmartFeed() {
       .then(() => refetch());
 
   const isInitialLoading = isPending && !error;
+  const isRegenerating = isFetching && !isPending;
 
   // --- Loading -----------------------------------------------------------
 
@@ -171,10 +389,10 @@ export function SmartFeed() {
             <Sparkles className="size-4 animate-pulse text-amber-400" />
             Generating your digest…
           </div>
+          <Skeleton className="h-16 w-32" />
           <Skeleton className="h-7 w-4/5" />
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-5/6" />
-          <Skeleton className="h-3 w-3/4" />
           <div className="mt-2 grid grid-cols-2 gap-2">
             <Skeleton className="h-14 w-full rounded-xl" />
             <Skeleton className="h-14 w-full rounded-xl" />
@@ -237,86 +455,132 @@ export function SmartFeed() {
 
   // --- Full digest -------------------------------------------------------
 
+  return <FullDigest digest={digest} onRegenerate={regenerate} isRegenerating={isRegenerating} />;
+}
+
+function FullDigest({
+  digest,
+  onRegenerate,
+  isRegenerating,
+}: {
+  digest: SmartFeedDigest;
+  onRegenerate: () => void;
+  isRegenerating: boolean;
+}) {
   const vibe = VIBE_STYLE[digest.vibe] ?? VIBE_STYLE.STEADY;
   const action = digest.suggestedAction;
-  const maxActivity = Math.max(1, ...digest.activityByDay);
-  const dayLabels = ["Su", "M", "Tu", "W", "Th", "F", "Sa"];
-  // Compute weekday labels for activityByDay (oldest first, i.e. 6 days ago → today)
-  const now = new Date();
-  const activityLabels = digest.activityByDay.map((_, i) => {
-    const d = new Date(now);
-    d.setDate(now.getDate() - (6 - i));
-    return dayLabels[d.getDay()];
+
+  const generatedDate = useMemo(() => new Date(digest.generatedAt), [
+    digest.generatedAt,
+  ]);
+  const issueNumber = getISOWeek(generatedDate);
+  const issueDateLabel = generatedDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
   });
+
+  // First letter drop cap — split off the first character, then render the
+  // rest of the summary with inline avatar chips for any featured names.
+  const firstChar = digest.summary[0] ?? "";
+  const summaryRest = digest.summary.slice(1);
+  const restNodes = useMemo(
+    () => renderProseWithAvatars(summaryRest, digest.featuredPeople),
+    [summaryRest, digest.featuredPeople]
+  );
 
   return (
     <div className="flex flex-col gap-4">
       {/* Hero card */}
       <div
         className={cn(
-          "relative overflow-hidden rounded-2xl border bg-zinc-900/60 p-5",
+          "relative overflow-hidden rounded-2xl border bg-zinc-900/60 p-6",
           vibe.ring
         )}
       >
+        {isRegenerating && <div className="smart-feed-shimmer" />}
+
         <div
           className={cn(
-            "pointer-events-none absolute -right-20 -top-20 size-64 rounded-full blur-3xl",
+            "pointer-events-none absolute -right-24 -top-24 size-64 rounded-full blur-3xl",
             vibe.glow
           )}
         />
-        {/* Subtle gradient wash behind the content */}
         <div
           className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b to-transparent",
+            "pointer-events-none absolute inset-x-0 top-0 h-28 bg-gradient-to-b to-transparent",
             vibe.accent
           )}
         />
 
-        {/* Meta row */}
+        {/* Masthead — issue number + timeframe + regenerate */}
         <div
-          className="smart-feed-fade relative mb-3 flex items-center justify-between"
+          className="smart-feed-fade relative mb-5 flex items-center justify-between"
           style={{ ["--stagger" as string]: 0 }}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+            <span>Issue {String(issueNumber).padStart(2, "0")}</span>
+            <span className="text-zinc-700">·</span>
+            <span>{issueDateLabel}</span>
+            <span className="text-zinc-700">·</span>
+            <span className="text-zinc-400">{digest.timeframe}</span>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
             <span
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                 vibe.badge
               )}
             >
               <Sparkles className="size-3" />
               {digest.vibe}
             </span>
-            <span className="text-[11px] text-zinc-500">·</span>
-            <span className="text-[11px] font-medium text-zinc-400">
-              {digest.timeframe}
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-            <span>
-              {digest.sourceCount} event{digest.sourceCount === 1 ? "" : "s"}
-            </span>
-            <span>·</span>
-            <span>{formatRelativeTime(digest.generatedAt)}</span>
             <button
-              onClick={regenerate}
-              disabled={isFetching}
-              className="ml-1 inline-flex size-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
+              onClick={onRegenerate}
+              disabled={isRegenerating}
+              className="ml-1 inline-flex size-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
               title="Regenerate digest"
               aria-label="Regenerate digest"
             >
               <RotateCw
-                className={cn("size-3", isFetching && "animate-spin")}
+                className={cn("size-3.5", isRegenerating && "animate-spin")}
               />
             </button>
           </div>
+        </div>
+
+        {/* Hero stat + headline — two-column on desktop */}
+        <div
+          className="smart-feed-fade relative mb-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"
+          style={{ ["--stagger" as string]: 1 }}
+        >
+          {digest.heroStat && (
+            <div className="flex flex-col">
+              <span className="font-[family-name:var(--font-playfair)] text-[56px] font-semibold leading-none text-zinc-50 sm:text-[64px]">
+                <HeroStatValue raw={digest.heroStat.value} />
+              </span>
+              <span className="mt-1 text-[11px] font-semibold uppercase tracking-widest text-zinc-500">
+                {digest.heroStat.label}
+              </span>
+            </div>
+          )}
+          {digest.headline && (
+            <h2
+              className={cn(
+                "font-[family-name:var(--font-playfair)] text-[20px] font-semibold leading-snug tracking-tight text-zinc-50 sm:text-[22px]",
+                digest.heroStat ? "sm:max-w-[60%] sm:text-right" : ""
+              )}
+            >
+              {digest.headline}
+            </h2>
+          )}
         </div>
 
         {/* People row */}
         {digest.featuredPeople.length > 0 && (
           <div
             className="smart-feed-fade relative mb-4 flex items-center gap-3"
-            style={{ ["--stagger" as string]: 1 }}
+            style={{ ["--stagger" as string]: 2 }}
           >
             <div className="flex -space-x-2">
               {digest.featuredPeople.slice(0, 5).map((p) => (
@@ -345,98 +609,71 @@ export function SmartFeed() {
           </div>
         )}
 
-        {/* Headline (serif, editorial) */}
-        {digest.headline && (
-          <h2
-            className="smart-feed-fade relative mb-2 font-[family-name:var(--font-playfair)] text-[22px] font-semibold leading-tight tracking-tight text-zinc-50"
-            style={{ ["--stagger" as string]: 2 }}
-          >
-            {digest.headline}
-          </h2>
-        )}
-
-        {/* Summary */}
+        {/* Summary with drop cap + inline avatar chips */}
         <p
           className="smart-feed-fade relative text-[14px] leading-relaxed text-zinc-300"
           style={{ ["--stagger" as string]: 3 }}
         >
-          {digest.summary}
+          <span className="float-left mr-2 mt-1 font-[family-name:var(--font-playfair)] text-[42px] font-semibold leading-[0.85] text-zinc-100">
+            {firstChar}
+          </span>
+          {restNodes}
         </p>
 
-        {/* Highlight */}
+        {/* Highlight as a pull-quote */}
         {digest.highlight && (
           <div
-            className="smart-feed-fade relative mt-4 flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5"
+            className="smart-feed-fade relative mt-6 flex flex-col items-center px-4 text-center"
             style={{ ["--stagger" as string]: 4 }}
           >
-            <Star className="mt-0.5 size-4 shrink-0 fill-amber-400 text-amber-400" />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400">
-                Highlight
-              </span>
-              <span className="text-[13px] leading-snug text-zinc-100">
-                {digest.highlight}
-              </span>
-            </div>
+            <span
+              className="mb-1 font-[family-name:var(--font-playfair)] text-[48px] leading-none text-amber-400/60"
+              aria-hidden
+            >
+              &ldquo;
+            </span>
+            <p className="font-[family-name:var(--font-playfair)] text-[17px] italic leading-snug text-zinc-100 sm:text-[18px]">
+              {digest.highlight}
+            </p>
+            <div className="mt-3 h-px w-12 bg-amber-500/30" />
+            <span className="mt-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400/80">
+              Highlight of the week
+            </span>
           </div>
         )}
 
-        {/* Your vs. followed split + 7-day activity strip */}
-        {digest.sourceCount > 0 && (
-          <div
-            className="smart-feed-fade relative mt-4 flex items-center gap-4"
-            style={{ ["--stagger" as string]: 5 }}
-          >
-            {/* Your vs. them */}
-            <div className="flex-1">
-              <div className="mb-1 flex items-center justify-between text-[10px]">
-                <span className="font-medium text-zinc-400">
-                  You {digest.myShare}%
-                </span>
-                <span className="text-zinc-500">
-                  Following {digest.followedShare}%
-                </span>
-              </div>
-              <div className="flex h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                <div
-                  className="bg-blue-500/70 transition-all"
-                  style={{ width: `${digest.myShare}%` }}
-                />
-                <div
-                  className="bg-zinc-600/60 transition-all"
-                  style={{ width: `${digest.followedShare}%` }}
-                />
-              </div>
-            </div>
-
-            {/* 7-day shape */}
-            <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-medium text-zinc-500">
-                7-day shape
+        {/* Metrics row — split bar + sparkline */}
+        <div
+          className="smart-feed-fade relative mt-6 flex items-center gap-5 border-t border-zinc-800/50 pt-4"
+          style={{ ["--stagger" as string]: 5 }}
+        >
+          <div className="flex-1">
+            <div className="mb-1 flex items-center justify-between text-[10px]">
+              <span className="font-semibold uppercase tracking-wider text-zinc-400">
+                You {digest.myShare}%
               </span>
-              <div className="flex items-end gap-0.5">
-                {digest.activityByDay.map((count, i) => {
-                  const intensity = count / maxActivity;
-                  const bg =
-                    count === 0
-                      ? "bg-zinc-800"
-                      : intensity > 0.66
-                        ? "bg-emerald-500/80"
-                        : intensity > 0.33
-                          ? "bg-emerald-500/50"
-                          : "bg-emerald-500/25";
-                  return (
-                    <div
-                      key={i}
-                      className={cn("size-3 rounded-sm", bg)}
-                      title={`${activityLabels[i]}: ${count} event${count === 1 ? "" : "s"}`}
-                    />
-                  );
-                })}
-              </div>
+              <span className="uppercase tracking-wider text-zinc-500">
+                Following {digest.followedShare}%
+              </span>
+            </div>
+            <div className="flex h-1.5 overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="bg-blue-500/80 transition-all"
+                style={{ width: `${digest.myShare}%` }}
+              />
+              <div
+                className="bg-zinc-600/60 transition-all"
+                style={{ width: `${digest.followedShare}%` }}
+              />
             </div>
           </div>
-        )}
+          <div className="flex flex-col items-end">
+            <span className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              7-day shape
+            </span>
+            <Sparkline data={digest.activityByDay} />
+          </div>
+        </div>
       </div>
 
       {/* Theme chips */}
@@ -475,7 +712,7 @@ export function SmartFeed() {
         <ActionRow
           action={action}
           stagger={6 + digest.groups.length}
-          onRegenerate={regenerate}
+          onRegenerate={onRegenerate}
         />
       )}
     </div>

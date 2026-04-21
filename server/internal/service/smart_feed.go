@@ -49,11 +49,21 @@ type FeaturedPerson struct {
 	Count     int    `json:"count"` // how many items in this digest are theirs
 }
 
+// HeroStat is the single biggest number in the digest, rendered huge with a
+// count-up animation on the hero card. Chosen by the LLM from the feed.
+type HeroStat struct {
+	Value string `json:"value"` // Usually a number as a string, e.g. "17" or "1.2K"
+	Label string `json:"label"` // Short noun phrase, e.g. "commits this week"
+}
+
 // SmartFeedDigest is the structured response the frontend consumes.
 type SmartFeedDigest struct {
 	// Vibe is a one-word energy tag: MOMENTUM, STEADY, EXPLORING, QUIET, MIXED.
 	// Rendered as a badge above the summary.
 	Vibe string `json:"vibe"`
+	// HeroStat is the single biggest number in the digest (e.g. "17 commits"),
+	// rendered as a large magazine-cover display element.
+	HeroStat *HeroStat `json:"heroStat,omitempty"`
 	// Timeframe is a short human phrase describing the window, e.g., "last 7 days".
 	// Computed server-side from the oldest item in the source set.
 	Timeframe string `json:"timeframe"`
@@ -197,6 +207,7 @@ Produce a JSON object with exactly these fields:
 
 {
   "vibe": "ONE of: MOMENTUM, STEADY, EXPLORING, QUIET, MIXED. Pick based on the viewer's OWN activity intensity and variety.",
+  "heroStat": {"value": "17", "label": "commits this week"},
   "headline": "A single punchy line (under 70 chars) that captures the week's energy. Written to the viewer. No emoji.",
   "summary": "2-3 sentences in second person. Use 'you' / 'your' for items where isMine is true. Name other people (first name preferred) for items where isMine is false. Be specific: counts, repo names, video titles.",
   "highlight": "Under 90 chars. The ONE most impressive thing in the feed — prefer the viewer's own if they have something noteworthy, otherwise the most interesting thing from someone they follow. Can be empty string if nothing stands out.",
@@ -209,6 +220,13 @@ Produce a JSON object with exactly these fields:
     "targetUsername": "The @username of the person the action refers to, copied from a feed item. MUST be exactly one of the usernames that appears in the feed items. Use empty string if the action is self-directed (about the viewer's own work)."
   }
 }
+
+Rules for heroStat:
+- Pick the SINGLE most impressive number from the feed. Prefer the viewer's own activity when competitive.
+- Priority: commit counts > video view/subscriber milestones > star milestones > repo counts > PR merges.
+- value must be a short number string ("17", "1.2K", "50+"). Use SI abbreviations for anything >= 1000.
+- label must be 2-5 words, noun phrase, describing what the number counts (e.g., "commits this week", "stars on praxis", "subscribers"). Start with lowercase.
+- If nothing in the feed has a meaningful number, omit heroStat entirely (return null).
 
 Rules for groups:
 - 2 to 5 groups.
@@ -276,6 +294,7 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 
 	var parsed struct {
 		Vibe            string           `json:"vibe"`
+		HeroStat        *HeroStat        `json:"heroStat"`
 		Headline        string           `json:"headline"`
 		Summary         string           `json:"summary"`
 		Highlight       string           `json:"highlight"`
@@ -328,8 +347,15 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 		}
 	}
 
+	// Drop empty heroStat (Claude sometimes returns {"value":"","label":""}).
+	heroStat := parsed.HeroStat
+	if heroStat != nil && (heroStat.Value == "" || heroStat.Label == "") {
+		heroStat = nil
+	}
+
 	return &SmartFeedDigest{
 		Vibe:            parsed.Vibe,
+		HeroStat:        heroStat,
 		Timeframe:       computeTimeframe(achievements),
 		Headline:        parsed.Headline,
 		Summary:         parsed.Summary,
