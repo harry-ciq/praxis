@@ -20,19 +20,44 @@ import (
 var ErrSmartFeedUnavailable = errors.New("smart feed unavailable")
 
 // SmartFeedGroup is one themed chip in the digest.
+//
+// Theme is a stable tag the LLM picks from a small vocabulary so the frontend
+// can color-code groups without parsing the emoji or label.
 type SmartFeedGroup struct {
 	Emoji  string `json:"emoji"`
 	Label  string `json:"label"`
 	Detail string `json:"detail"`
+	Theme  string `json:"theme"` // SHIPPING | CONTENT | MILESTONE | COMMUNITY | LEARNING | OTHER
+}
+
+// SmartFeedAction is a single suggested next step.
+type SmartFeedAction struct {
+	Label string `json:"label"` // short description of the action
+	CTA   string `json:"cta"`   // button text (e.g., "View", "React", "Follow up")
 }
 
 // SmartFeedDigest is the structured response the frontend consumes.
 type SmartFeedDigest struct {
-	Summary     string           `json:"summary"`
-	Groups      []SmartFeedGroup `json:"groups"`
-	SourceCount int              `json:"sourceCount"`
-	GeneratedAt time.Time        `json:"generatedAt"`
-	Cached      bool             `json:"cached"`
+	// Vibe is a one-word energy tag: MOMENTUM, STEADY, EXPLORING, QUIET, MIXED.
+	// Rendered as a badge above the summary.
+	Vibe string `json:"vibe"`
+	// Timeframe is a short human phrase describing the window, e.g., "last 7 days".
+	// Computed server-side from the oldest item in the source set.
+	Timeframe string `json:"timeframe"`
+	// Headline is a single attention-grabbing line, distinct from the longer summary.
+	Headline string `json:"headline"`
+	// Summary is the 2-3 sentence narrative in second person.
+	Summary string `json:"summary"`
+	// Highlight is the ONE most impressive thing this window, as a short line.
+	Highlight string `json:"highlight"`
+	// Groups are themed chips — 2 to 5 of them.
+	Groups []SmartFeedGroup `json:"groups"`
+	// SuggestedAction is one specific next step the viewer could take, or nil.
+	SuggestedAction *SmartFeedAction `json:"suggestedAction,omitempty"`
+
+	SourceCount int       `json:"sourceCount"`
+	GeneratedAt time.Time `json:"generatedAt"`
+	Cached      bool      `json:"cached"`
 }
 
 // SmartFeedService computes an LLM-assisted digest of a user's feed.
@@ -141,32 +166,54 @@ func (s *SmartFeedService) writeCache(ctx context.Context, key string, d *SmartF
 // across users so this block is marked as cacheable (5-min ephemeral). The
 // viewer's identity is injected in the user message so it doesn't bust the
 // system-prompt cache.
-const smartFeedSystemPrompt = `You summarize a social feed of verified professional achievements on Praxis, a network where every event is real (repo creation, star milestones, YouTube videos published, subscriber milestones, commit streaks, PR merges).
+const smartFeedSystemPrompt = `You write a polished weekly digest for ONE SPECIFIC VIEWER on Praxis, a network where every achievement is verified from the real source (GitHub repos, commit streaks, PR merges, YouTube videos, subscriber/view milestones).
 
-You write the summary FOR ONE SPECIFIC VIEWER. Each feed item is tagged with "isMine": when true the event is the viewer's own activity; when false it belongs to someone the viewer follows.
+Each feed item is tagged with "isMine": when true the event is the viewer's own activity; when false it belongs to someone the viewer follows.
 
 Produce a JSON object with exactly these fields:
 
 {
-  "summary": "2-3 sentences written TO the viewer in second person. Use 'you' / 'your' for items where isMine is true. Use the other person's name (first name preferred) for items where isMine is false. Be specific: mention counts, repo names, video titles. No marketing fluff.",
+  "vibe": "ONE of: MOMENTUM, STEADY, EXPLORING, QUIET, MIXED. Pick based on the viewer's OWN activity intensity and variety.",
+  "headline": "A single punchy line (under 70 chars) that captures the week's energy. Written to the viewer. No emoji.",
+  "summary": "2-3 sentences in second person. Use 'you' / 'your' for items where isMine is true. Name other people (first name preferred) for items where isMine is false. Be specific: counts, repo names, video titles.",
+  "highlight": "Under 90 chars. The ONE most impressive thing in the feed — prefer the viewer's own if they have something noteworthy, otherwise the most interesting thing from someone they follow. Can be empty string if nothing stands out.",
   "groups": [
-    {"emoji": "🚀", "label": "Short theme", "detail": "one-line detail. Prefer separating 'Your …' from activity by people you follow when both exist."}
-  ]
+    {"emoji": "🚀", "label": "Short theme", "detail": "one-line detail under 80 chars", "theme": "SHIPPING"}
+  ],
+  "suggestedAction": {
+    "label": "ONE specific, low-friction thing the viewer could do next. Examples: 'React to Harry's new video', 'Message Sarah about her ML pipeline', 'Keep your 3-week shipping streak alive'. Under 70 chars.",
+    "cta": "Short button text: React | View | Follow up | Keep going | Explore"
+  }
 }
 
-Rules:
-- Output ONLY the JSON object. No markdown fences, no commentary.
-- 2 to 5 groups. Each emoji/label/detail must be short (detail < 80 chars).
-- If the viewer has their own recent activity, the first group should reflect that with "Your ..." phrasing.
-- Good themes: Shipping (repos/commits), Content (videos/articles), Milestones (stars/subscribers/views), Community (PRs merged, first OSS).
-- If the feed is empty or trivial, return a short summary saying so and an empty groups array.
+Rules for groups:
+- 2 to 5 groups.
+- Theme must be one of: SHIPPING, CONTENT, MILESTONE, COMMUNITY, LEARNING, OTHER.
+  * SHIPPING = repos created, commits, weekly commits
+  * CONTENT = videos published, articles, channels
+  * MILESTONE = stars, subscribers, views
+  * COMMUNITY = PRs merged to others' repos, first OSS contribution
+  * LEARNING = new skills, streaks
+- If the viewer has their own recent activity, the FIRST group should be about them with "Your …" phrasing.
+- When grouping someone else's activity, lead with their first name.
+
+Rules for suggestedAction:
+- Pick something that creates social connection or keeps momentum. Avoid generic "share your achievements" vibes.
+- Reference a specific person or piece of content from the feed when possible.
+- If the feed is genuinely empty, set suggestedAction to null and vibe to QUIET.
+
+Output rules:
+- Output ONLY the JSON object. No markdown fences, no commentary, no surrounding prose.
 - Never invent data. Only use facts that appear in the feed items.`
 
 func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User, achievements []repository.AchievementWithUser) (*SmartFeedDigest, error) {
 	if len(achievements) == 0 {
 		return &SmartFeedDigest{
-			Summary:     "Your feed is quiet right now. Follow some builders to see their achievements here.",
-			Groups:      []SmartFeedGroup{},
+			Vibe:      "QUIET",
+			Timeframe: "right now",
+			Headline:  "Your feed is quiet — time to find some builders to follow.",
+			Summary:   "No activity from you or the people you follow yet. Follow a few more builders to populate this digest.",
+			Groups:    []SmartFeedGroup{},
 			SourceCount: 0,
 			GeneratedAt: time.Now(),
 		}, nil
@@ -188,7 +235,7 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	itemsJSON, _ := json.MarshalIndent(items, "", "  ")
 
 	viewerHeader := fmt.Sprintf(
-		"Viewer: %s (@%s). Write the summary to them using 'you' for items where isMine is true.\n\nFeed items (newest first):\n\n",
+		"Viewer: %s (@%s). Write the digest to them using 'you' for items where isMine is true.\n\nFeed items (newest first):\n\n",
 		viewer.Name, viewer.Username,
 	)
 	userText := viewerHeader + string(itemsJSON)
@@ -196,17 +243,20 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	system := []llm.ContentBlock{llm.CacheableBlock(smartFeedSystemPrompt)}
 	userBlocks := []llm.ContentBlock{llm.TextBlock(userText)}
 
-	raw, _, err := s.llmClient.Complete(ctx, system, userBlocks, 800)
+	raw, _, err := s.llmClient.Complete(ctx, system, userBlocks, 1200)
 	if err != nil {
 		return nil, fmt.Errorf("llm: %w", err)
 	}
 
-	// Claude sometimes wraps in ```json ... ``` even when instructed not to.
 	cleaned := stripCodeFence(raw)
 
 	var parsed struct {
-		Summary string           `json:"summary"`
-		Groups  []SmartFeedGroup `json:"groups"`
+		Vibe            string           `json:"vibe"`
+		Headline        string           `json:"headline"`
+		Summary         string           `json:"summary"`
+		Highlight       string           `json:"highlight"`
+		Groups          []SmartFeedGroup `json:"groups"`
+		SuggestedAction *SmartFeedAction `json:"suggestedAction"`
 	}
 	if err := json.Unmarshal([]byte(cleaned), &parsed); err != nil {
 		s.logger.Warn("smart feed: failed to parse LLM output as JSON",
@@ -219,13 +269,87 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	if parsed.Groups == nil {
 		parsed.Groups = []SmartFeedGroup{}
 	}
+	// Normalise theme tags to the vocabulary the frontend knows
+	for i := range parsed.Groups {
+		parsed.Groups[i].Theme = normaliseTheme(parsed.Groups[i].Theme)
+	}
+	if parsed.Vibe == "" {
+		parsed.Vibe = "STEADY"
+	}
+	parsed.Vibe = normaliseVibe(parsed.Vibe)
+
+	// Drop empty suggestedAction blocks
+	if parsed.SuggestedAction != nil && parsed.SuggestedAction.Label == "" {
+		parsed.SuggestedAction = nil
+	}
 
 	return &SmartFeedDigest{
-		Summary:     parsed.Summary,
-		Groups:      parsed.Groups,
-		SourceCount: len(achievements),
-		GeneratedAt: time.Now(),
+		Vibe:            parsed.Vibe,
+		Timeframe:       computeTimeframe(achievements),
+		Headline:        parsed.Headline,
+		Summary:         parsed.Summary,
+		Highlight:       parsed.Highlight,
+		Groups:          parsed.Groups,
+		SuggestedAction: parsed.SuggestedAction,
+		SourceCount:     len(achievements),
+		GeneratedAt:     time.Now(),
 	}, nil
+}
+
+// computeTimeframe returns a short phrase describing the digest window.
+//
+// We bias toward how *recent* the activity is rather than how far back the
+// full 50-item feed stretches: a user whose 50th-most-recent achievement was
+// years ago still thinks of their digest as "this week" if the top items are
+// from today. We look at the newest item's age to avoid headlines like
+// "last 8 years" when the feed is dominated by the last few days.
+func computeTimeframe(achievements []repository.AchievementWithUser) string {
+	if len(achievements) == 0 {
+		return "right now"
+	}
+	newest := achievements[0].CreatedAt
+	for _, a := range achievements {
+		if a.CreatedAt.After(newest) {
+			newest = a.CreatedAt
+		}
+	}
+	hours := time.Since(newest).Hours()
+	switch {
+	case hours < 24:
+		return "today"
+	case hours < 24*7:
+		return "this week"
+	case hours < 24*14:
+		return "the last 2 weeks"
+	case hours < 24*31:
+		return "this month"
+	default:
+		return "recent activity"
+	}
+}
+
+var validVibes = map[string]bool{
+	"MOMENTUM": true, "STEADY": true, "EXPLORING": true, "QUIET": true, "MIXED": true,
+}
+
+func normaliseVibe(v string) string {
+	v = strings.ToUpper(strings.TrimSpace(v))
+	if validVibes[v] {
+		return v
+	}
+	return "STEADY"
+}
+
+var validThemes = map[string]bool{
+	"SHIPPING": true, "CONTENT": true, "MILESTONE": true, "COMMUNITY": true, "LEARNING": true, "OTHER": true,
+}
+
+func normaliseTheme(t string) string {
+	t = strings.ToUpper(strings.TrimSpace(t))
+	if validThemes[t] {
+		return t
+	}
+	return "OTHER"
 }
 
 // stripCodeFence removes leading/trailing ```json fences and whitespace.
