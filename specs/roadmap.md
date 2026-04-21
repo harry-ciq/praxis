@@ -119,7 +119,17 @@ Phases 1-14 shipped an end-to-end product. V2 turns it into something trustworth
 
 These make Praxis meaningfully different from LinkedIn. Do these first.
 
-### Phase 15 — Cryptographic verification **[NEXT]**
+### Phase 15 — Smart feed (AI digest) **[DONE]**
+Adds a second tab on the home feed that runs the raw feed through Claude and returns a human-readable digest.
+- `GET /api/v1/feed/smart?refresh=true` — fetches last 50 feed items (same scope as raw: self + followed) and returns `{summary, groups[], sourceCount, generatedAt, cached}`
+- Redis-cached per user with configurable TTL (default 15 min) to control cost
+- Prompt caching on the system instructions (Anthropic ephemeral cache, 5-min TTL) so the instruction block is billed at ~10% on repeat calls
+- Config: `ANTHROPIC_API_KEY`, `SMART_FEED_MODEL` (default `claude-haiku-4-5`), `SMART_FEED_CACHE_TTL`
+- Tight per-IP rate limit of 10 req/min on the endpoint — each miss costs real LLM tokens
+- Frontend: Raw / Smart tab switcher on `/feed`; SmartFeed component with loading skeleton, error states (incl. graceful 503 "not configured"), summary card with gradient + sparkle badge, theme-group chips, and a Regenerate button
+- Returns the real model and token-usage report in structured server logs for cost monitoring
+
+### Phase 16 — Cryptographic verification **[NEXT]**
 Currently `verification_hash` is a nullable column; the "Verified" badge is cosmetic. Phase 15 turns it into a real cryptographic attestation.
 - Ed25519 server keypair stored in env/KMS; public key exposed at `/.well-known/praxis-pubkey.json`
 - Signed payload: `{userId, type, sourceId, occurredAt, proofUrl}` canonicalized (RFC 8785 JCS) → SHA256 → Ed25519

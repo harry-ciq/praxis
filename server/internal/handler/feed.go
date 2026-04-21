@@ -10,10 +10,38 @@ import (
 
 type FeedHandler struct {
 	achievementService *service.AchievementService
+	smartFeedService   *service.SmartFeedService
 }
 
-func NewFeedHandler(achievementService *service.AchievementService) *FeedHandler {
-	return &FeedHandler{achievementService: achievementService}
+func NewFeedHandler(achievementService *service.AchievementService, smartFeedService *service.SmartFeedService) *FeedHandler {
+	return &FeedHandler{
+		achievementService: achievementService,
+		smartFeedService:   smartFeedService,
+	}
+}
+
+// GetSmartFeed returns an LLM-assisted digest of the user's raw feed.
+// GET /api/v1/feed/smart?refresh=true
+func (h *FeedHandler) GetSmartFeed(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserFromContext(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	force := r.URL.Query().Get("refresh") == "true"
+
+	digest, err := h.smartFeedService.Generate(r.Context(), claims.UserID, force)
+	if err != nil {
+		if err == service.ErrSmartFeedUnavailable {
+			writeError(w, http.StatusServiceUnavailable, "smart feed is not configured on this server")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "smart feed generation failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, digest)
 }
 
 // GetFeed returns a paginated feed of achievements.

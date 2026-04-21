@@ -20,6 +20,7 @@ import (
 
 	"github.com/praxis-social/praxis/server/internal/config"
 	"github.com/praxis-social/praxis/server/internal/handler"
+	"github.com/praxis-social/praxis/server/internal/llm"
 	"github.com/praxis-social/praxis/server/internal/middleware"
 	"github.com/praxis-social/praxis/server/internal/provider"
 	"github.com/praxis-social/praxis/server/internal/repository"
@@ -118,6 +119,8 @@ func main() {
 	// Services
 	authService := service.NewAuthService(userRepo, rdb, cfg)
 	achievementService := service.NewAchievementService(achievementRepo, providerRepo, userRepo, skillRepo, providerRegistry, logger)
+	llmClient := llm.NewClient(cfg.AnthropicAPIKey, cfg.SmartFeedModel, logger)
+	smartFeedService := service.NewSmartFeedService(achievementRepo, llmClient, rdb, cfg.SmartFeedCacheTTL, logger)
 	userService := service.NewUserService(userRepo, followRepo, achievementRepo, providerRepo, experienceRepo, skillRepo)
 	messageService := service.NewMessageService(messageRepo, userRepo, hub, logger)
 	jobService := service.NewJobService(jobRepo, achievementRepo, logger)
@@ -126,7 +129,7 @@ func main() {
 	// Handlers
 	authHandler := handler.NewAuthHandler(authService, userRepo)
 	achievementHandler := handler.NewAchievementHandler(achievementService)
-	feedHandler := handler.NewFeedHandler(achievementService)
+	feedHandler := handler.NewFeedHandler(achievementService, smartFeedService)
 	userHandler := handler.NewUserHandler(userService, achievementService, experienceRepo, skillRepo)
 	messageHandler := handler.NewMessageHandler(messageService)
 	jobHandler := handler.NewJobHandler(jobService)
@@ -200,8 +203,13 @@ func main() {
 				r.Delete("/{id}/reactions", achievementHandler.RemoveReaction)
 			})
 
-			// Feed route
+			// Feed routes
 			r.Get("/feed", feedHandler.GetFeed)
+			// Smart feed is rate-limited more tightly since each call costs LLM tokens.
+			r.Group(func(r chi.Router) {
+				r.Use(httprate.LimitByIP(10, time.Minute))
+				r.Get("/feed/smart", feedHandler.GetSmartFeed)
+			})
 
 			// Job routes (protected)
 			r.Post("/jobs", jobHandler.CreateJob)

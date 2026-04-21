@@ -1,11 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Rss, RefreshCw, Check } from "lucide-react";
+import { Loader2, Rss, RefreshCw, Check, Sparkles } from "lucide-react";
 import { useFeed } from "@/hooks/use-feed";
 import { AchievementCard } from "@/components/achievements/achievement-card";
+import { SmartFeed } from "@/components/feed/smart-feed";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api-client";
+import { cn } from "@/lib/utils";
+
+type FeedTab = "raw" | "smart";
 
 function FeedSkeleton() {
   return (
@@ -53,6 +57,8 @@ function EmptyState() {
 }
 
 export default function FeedPage() {
+  const [tab, setTab] = useState<FeedTab>("raw");
+
   const {
     data,
     isLoading,
@@ -123,7 +129,7 @@ export default function FeedPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
       {/* Header */}
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-4 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-bold text-zinc-100">Feed</h1>
           <p className="text-sm text-zinc-500">What builders are shipping</p>
@@ -152,8 +158,38 @@ export default function FeedPage() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="mb-4 flex items-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 p-1">
+        <button
+          onClick={() => setTab("raw")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+            tab === "raw"
+              ? "bg-zinc-800 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Rss className="size-3.5" />
+          Raw feed
+        </button>
+        <button
+          onClick={() => setTab("smart")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+            tab === "smart"
+              ? "bg-zinc-800 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Sparkles className="size-3.5 text-amber-400" />
+          Smart feed
+        </button>
+      </div>
+
       {/* Content */}
-      {isLoading ? (
+      {tab === "smart" ? (
+        <SmartFeed />
+      ) : isLoading ? (
         <FeedSkeleton />
       ) : achievements.length === 0 ? (
         <EmptyState />

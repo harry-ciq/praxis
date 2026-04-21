@@ -17,11 +17,18 @@ class ApiClient {
 
   private async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
-      const error: ApiError = await response.json().catch(() => ({
-        error: "unknown_error",
-        message: response.statusText,
+      const parsed = await response.json().catch(() => null);
+      const error: ApiError = {
+        error:
+          (parsed && typeof parsed === "object" && "error" in parsed
+            ? (parsed as { error?: string }).error
+            : undefined) ?? "unknown_error",
+        message:
+          (parsed && typeof parsed === "object" && "message" in parsed
+            ? (parsed as { message?: string }).message
+            : undefined) ?? response.statusText,
         statusCode: response.status,
-      }));
+      };
       throw error;
     }
     return response.json();

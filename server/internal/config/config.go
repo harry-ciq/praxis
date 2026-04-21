@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -21,6 +22,9 @@ type Config struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	GitHubWebhookSecret string
+	AnthropicAPIKey    string
+	SmartFeedModel     string
+	SmartFeedCacheTTL  int // seconds
 	FrontendURL        string
 	Environment        string
 }
@@ -36,6 +40,9 @@ func Load() *Config {
 		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
 		GitHubWebhookSecret: getEnv("GITHUB_WEBHOOK_SECRET", ""),
+		AnthropicAPIKey:    getEnv("ANTHROPIC_API_KEY", ""),
+		SmartFeedModel:     getEnv("SMART_FEED_MODEL", "claude-haiku-4-5"),
+		SmartFeedCacheTTL:  getEnvInt("SMART_FEED_CACHE_TTL", 900),
 		FrontendURL:        getEnv("FRONTEND_URL", "http://localhost:3000"),
 		Environment:        getEnv("ENVIRONMENT", "development"),
 	}
@@ -48,6 +55,15 @@ func (c *Config) IsDevelopment() bool {
 func getEnv(key, fallback string) string {
 	if val, ok := os.LookupEnv(key); ok {
 		return val
+	}
+	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	if val, ok := os.LookupEnv(key); ok {
+		if n, err := strconv.Atoi(val); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
