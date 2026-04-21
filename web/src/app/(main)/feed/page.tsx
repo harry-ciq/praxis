@@ -57,7 +57,7 @@ function EmptyState() {
 }
 
 export default function FeedPage() {
-  const [tab, setTab] = useState<FeedTab>("raw");
+  const [tab, setTab] = useState<FeedTab>("smart");
 
   const {
     data,
@@ -161,18 +161,6 @@ export default function FeedPage() {
       {/* Tabs */}
       <div className="mb-4 flex items-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 p-1">
         <button
-          onClick={() => setTab("raw")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-            tab === "raw"
-              ? "bg-zinc-800 text-zinc-100"
-              : "text-zinc-400 hover:text-zinc-200"
-          )}
-        >
-          <Rss className="size-3.5" />
-          Raw feed
-        </button>
-        <button
           onClick={() => setTab("smart")}
           className={cn(
             "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
@@ -183,6 +171,18 @@ export default function FeedPage() {
         >
           <Sparkles className="size-3.5 text-amber-400" />
           Smart feed
+        </button>
+        <button
+          onClick={() => setTab("raw")}
+          className={cn(
+            "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
+            tab === "raw"
+              ? "bg-zinc-800 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          <Rss className="size-3.5" />
+          Raw feed
         </button>
       </div>
 
