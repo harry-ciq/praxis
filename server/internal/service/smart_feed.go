@@ -20,15 +20,43 @@ import (
 // (e.g. no ANTHROPIC_API_KEY in this environment).
 var ErrSmartFeedUnavailable = errors.New("smart feed unavailable")
 
+// AchievementStub is the minimum a chip / highlight needs to link back to the
+// underlying achievement — inlined on the digest so the frontend doesn't need
+// to make extra API calls to render a linked reveal.
+type AchievementStub struct {
+	ID       string `json:"id"`
+	Title    string `json:"title"`
+	Type     string `json:"type"`
+	ProofURL string `json:"proofUrl"`
+	Person   string `json:"person"`   // display name of the author
+	Username string `json:"username"` // author's @handle
+}
+
 // SmartFeedGroup is one themed chip in the digest.
 //
 // Theme is a stable tag the LLM picks from a small vocabulary so the frontend
 // can color-code groups without parsing the emoji or label.
 type SmartFeedGroup struct {
-	Emoji  string `json:"emoji"`
-	Label  string `json:"label"`
-	Detail string `json:"detail"`
-	Theme  string `json:"theme"` // SHIPPING | CONTENT | MILESTONE | COMMUNITY | LEARNING | OTHER
+	Emoji        string            `json:"emoji"`
+	Label        string            `json:"label"`
+	Detail       string            `json:"detail"`
+	Theme        string            `json:"theme"` // SHIPPING | CONTENT | MILESTONE | COMMUNITY | LEARNING | OTHER
+	Achievements []AchievementStub `json:"achievements"`
+}
+
+// Milestone is a near-miss threshold that creates "just one more push" pull.
+type Milestone struct {
+	Emoji   string `json:"emoji"`
+	Label   string `json:"label"`   // e.g. "commits to your highest week ever"
+	Current int    `json:"current"` // where you are now
+	Target  int    `json:"target"`  // where you need to be
+}
+
+// WatchItem is a forward-looking prediction or thing-to-watch-this-week.
+type WatchItem struct {
+	Emoji          string `json:"emoji"`
+	Prediction     string `json:"prediction"`     // short sentence under 90 chars
+	TargetUsername string `json:"targetUsername"` // optional @handle (empty = self)
 }
 
 // SmartFeedAction is a single suggested next step. When Href is set, the
@@ -73,6 +101,9 @@ type SmartFeedDigest struct {
 	Summary string `json:"summary"`
 	// Highlight is the ONE most impressive thing this window, as a short line.
 	Highlight string `json:"highlight"`
+	// HighlightAchievement (if set) is the underlying record the highlight
+	// refers to — used to power the "See the achievement" link.
+	HighlightAchievement *AchievementStub `json:"highlightAchievement,omitempty"`
 	// Groups are themed chips — 2 to 5 of them.
 	Groups []SmartFeedGroup `json:"groups"`
 	// SuggestedAction is one specific next step the viewer could take, or nil.
@@ -87,6 +118,10 @@ type SmartFeedDigest struct {
 	// ActivityByDay is a 7-entry array of event counts, oldest-first.
 	// Drives the 7-day activity heat strip.
 	ActivityByDay []int `json:"activityByDay"`
+	// Milestones are near-miss thresholds — progress bars with "one more push".
+	Milestones []Milestone `json:"milestones"`
+	// Watching are forward-looking items worth keeping an eye on.
+	Watching []WatchItem `json:"watching"`
 
 	SourceCount int       `json:"sourceCount"`
 	GeneratedAt time.Time `json:"generatedAt"`
@@ -201,7 +236,7 @@ func (s *SmartFeedService) writeCache(ctx context.Context, key string, d *SmartF
 // system-prompt cache.
 const smartFeedSystemPrompt = `You write a polished weekly digest for ONE SPECIFIC VIEWER on Praxis, a network where every achievement is verified from the real source (GitHub repos, commit streaks, PR merges, YouTube videos, subscriber/view milestones).
 
-Each feed item is tagged with "isMine": when true the event is the viewer's own activity; when false it belongs to someone the viewer follows.
+Each feed item is tagged with "isMine": when true the event is the viewer's own activity; when false it belongs to someone the viewer follows. Each item also has an "id" — you will reference specific items by copying their id.
 
 Produce a JSON object with exactly these fields:
 
@@ -210,9 +245,31 @@ Produce a JSON object with exactly these fields:
   "heroStat": {"value": "17", "label": "commits this week"},
   "headline": "A single punchy line (under 70 chars) that captures the week's energy. Written to the viewer. No emoji.",
   "summary": "2-3 sentences in second person. Use 'you' / 'your' for items where isMine is true. Name other people (first name preferred) for items where isMine is false. Be specific: counts, repo names, video titles.",
-  "highlight": "Under 90 chars. The ONE most impressive thing in the feed — prefer the viewer's own if they have something noteworthy, otherwise the most interesting thing from someone they follow. Can be empty string if nothing stands out.",
+  "highlight": "Under 90 chars. The ONE most impressive thing in the feed — prefer the viewer's own if they have something noteworthy, otherwise the most interesting thing from someone they follow.",
+  "highlightId": "The id of the single feed item that backs the highlight. MUST be copied exactly from one of the feed items. Empty string if highlight is empty.",
   "groups": [
-    {"emoji": "🚀", "label": "Short theme", "detail": "one-line detail under 80 chars", "theme": "SHIPPING"}
+    {
+      "emoji": "🚀",
+      "label": "Short theme",
+      "detail": "one-line detail under 80 chars",
+      "theme": "SHIPPING",
+      "achievementIds": ["copy 1-3 exact ids from the feed items that make up this group"]
+    }
+  ],
+  "milestones": [
+    {
+      "emoji": "⭐",
+      "label": "under 60 chars. Phrase as 'X to <goal>'. Examples: 'stars to 100 on praxis', 'commits to your highest week ever', 'subscribers to Harry's first 10K'",
+      "current": 74,
+      "target": 100
+    }
+  ],
+  "watching": [
+    {
+      "emoji": "👀",
+      "prediction": "under 90 chars, forward-looking. Examples: 'Harry is 3 days from a week-long shipping streak', 'You're pacing 20+ commits this week'",
+      "targetUsername": "optional @handle from feed items. empty string if the prediction is about the viewer themselves."
+    }
   ],
   "suggestedAction": {
     "label": "ONE specific, low-friction thing the viewer could do next. Examples: 'React to Harry's new video', 'Message Sarah about her ML pipeline', 'Keep your 3-week shipping streak alive'. Under 70 chars.",
@@ -225,28 +282,33 @@ Rules for heroStat:
 - Pick the SINGLE most impressive number from the feed. Prefer the viewer's own activity when competitive.
 - Priority: commit counts > video view/subscriber milestones > star milestones > repo counts > PR merges.
 - value must be a short number string ("17", "1.2K", "50+"). Use SI abbreviations for anything >= 1000.
-- label must be 2-5 words, noun phrase, describing what the number counts (e.g., "commits this week", "stars on praxis", "subscribers"). Start with lowercase.
-- If nothing in the feed has a meaningful number, omit heroStat entirely (return null).
+- label must be 2-5 words, noun phrase (e.g., "commits this week", "stars on praxis"). Start with lowercase.
+- If nothing in the feed has a meaningful number, omit heroStat entirely.
 
 Rules for groups:
 - 2 to 5 groups.
 - Theme must be one of: SHIPPING, CONTENT, MILESTONE, COMMUNITY, LEARNING, OTHER.
-  * SHIPPING = repos created, commits, weekly commits
-  * CONTENT = videos published, articles, channels
-  * MILESTONE = stars, subscribers, views
-  * COMMUNITY = PRs merged to others' repos, first OSS contribution
-  * LEARNING = new skills, streaks
 - If the viewer has their own recent activity, the FIRST group should be about them with "Your …" phrasing.
-- When grouping someone else's activity, lead with their first name.
+- achievementIds: copy 1-3 real ids from the feed items that drove this theme. These MUST be exact matches from the feed. Never fabricate ids.
+
+Rules for milestones (0 to 3 items):
+- Near-miss thresholds that create "one more push" motivation. Only include a milestone if you can back it with concrete numbers from the feed metadata (current counts, threshold values, streak days).
+- current MUST be strictly LESS than target. If the feed shows a value already past a threshold, pick the next-higher target.
+- Examples: if metadata has current=74 stars and thresholds include 100, emit {label: "stars to 100 on praxis", current: 74, target: 100}.
+- If you can't find honest near-miss numbers, return an empty array. Never fabricate numbers.
+
+Rules for watching (0 to 2 items):
+- Forward-looking. Predictions MUST be grounded in current feed data (pace of commits, proximity to a known milestone threshold, days since last activity, etc.).
+- Prefer predictions about the viewer themselves; include a followed user only when their data makes it interesting.
+- If nothing forward-looking is honest, return an empty array.
 
 Rules for suggestedAction:
-- Pick something that creates social connection or keeps momentum. Avoid generic "share your achievements" vibes.
+- Pick something that creates social connection or keeps momentum. Avoid generic "share your achievements".
 - Reference a specific person or piece of content from the feed when possible.
-- If the feed is genuinely empty, set suggestedAction to null and vibe to QUIET.
 
 Output rules:
 - Output ONLY the JSON object. No markdown fences, no commentary, no surrounding prose.
-- Never invent data. Only use facts that appear in the feed items.`
+- Never invent data. Never invent ids. Never invent numbers.`
 
 func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User, achievements []repository.AchievementWithUser) (*SmartFeedDigest, error) {
 	if len(achievements) == 0 {
@@ -264,12 +326,15 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	items := make([]map[string]interface{}, 0, len(achievements))
 	for _, a := range achievements {
 		items = append(items, map[string]interface{}{
+			"id":          a.ID, // pass through to the LLM so it can reference specific items
 			"person":      a.UserName,
 			"username":    a.UserUsername,
 			"isMine":      a.UserID == viewer.ID,
 			"type":        a.Type,
 			"title":       a.Title,
 			"description": a.Description,
+			"proofUrl":    a.ProofURL,
+			"metadata":    a.Metadata, // passes through — json.RawMessage marshals verbatim
 			"source":      a.Source,
 			"when":        a.CreatedAt.Format(time.RFC3339),
 		})
@@ -293,12 +358,21 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	cleaned := stripCodeFence(raw)
 
 	var parsed struct {
-		Vibe            string           `json:"vibe"`
-		HeroStat        *HeroStat        `json:"heroStat"`
-		Headline        string           `json:"headline"`
-		Summary         string           `json:"summary"`
-		Highlight       string           `json:"highlight"`
-		Groups          []SmartFeedGroup `json:"groups"`
+		Vibe        string    `json:"vibe"`
+		HeroStat    *HeroStat `json:"heroStat"`
+		Headline    string    `json:"headline"`
+		Summary     string    `json:"summary"`
+		Highlight   string    `json:"highlight"`
+		HighlightID string    `json:"highlightId"`
+		Groups      []struct {
+			Emoji          string   `json:"emoji"`
+			Label          string   `json:"label"`
+			Detail         string   `json:"detail"`
+			Theme          string   `json:"theme"`
+			AchievementIDs []string `json:"achievementIds"`
+		} `json:"groups"`
+		Milestones      []Milestone `json:"milestones"`
+		Watching        []WatchItem `json:"watching"`
 		SuggestedAction *struct {
 			Label          string `json:"label"`
 			CTA            string `json:"cta"`
@@ -313,12 +387,78 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 		return nil, fmt.Errorf("LLM returned unparseable JSON: %w", err)
 	}
 
-	if parsed.Groups == nil {
-		parsed.Groups = []SmartFeedGroup{}
+	// Build an ID → achievement stub lookup so we can resolve the IDs Claude
+	// copied from the feed items. Anything Claude emits that isn't in this
+	// map is a hallucination and we drop it.
+	stubByID := make(map[string]AchievementStub, len(achievements))
+	for _, a := range achievements {
+		stubByID[a.ID] = AchievementStub{
+			ID:       a.ID,
+			Title:    a.Title,
+			Type:     a.Type,
+			ProofURL: a.ProofURL,
+			Person:   a.UserName,
+			Username: a.UserUsername,
+		}
 	}
-	for i := range parsed.Groups {
-		parsed.Groups[i].Theme = normaliseTheme(parsed.Groups[i].Theme)
+
+	// Transform parsed groups into the typed SmartFeedGroup the frontend sees,
+	// attaching validated achievement stubs.
+	groups := make([]SmartFeedGroup, 0, len(parsed.Groups))
+	for _, g := range parsed.Groups {
+		stubs := make([]AchievementStub, 0, len(g.AchievementIDs))
+		seen := make(map[string]bool)
+		for _, id := range g.AchievementIDs {
+			if seen[id] {
+				continue
+			}
+			if stub, ok := stubByID[id]; ok {
+				stubs = append(stubs, stub)
+				seen[id] = true
+			}
+			if len(stubs) == 3 {
+				break
+			}
+		}
+		groups = append(groups, SmartFeedGroup{
+			Emoji:        g.Emoji,
+			Label:        g.Label,
+			Detail:       g.Detail,
+			Theme:        normaliseTheme(g.Theme),
+			Achievements: stubs,
+		})
 	}
+
+	// Resolve the highlight's backing achievement (if any).
+	var highlightAch *AchievementStub
+	if parsed.HighlightID != "" {
+		if stub, ok := stubByID[parsed.HighlightID]; ok {
+			s := stub
+			highlightAch = &s
+		}
+	}
+
+	// Sanity-check milestones (drop invalid or impossible entries).
+	milestones := make([]Milestone, 0, len(parsed.Milestones))
+	for _, m := range parsed.Milestones {
+		if m.Label == "" || m.Emoji == "" {
+			continue
+		}
+		if m.Target <= 0 || m.Current < 0 || m.Current >= m.Target {
+			continue
+		}
+		milestones = append(milestones, m)
+	}
+
+	// Sanity-check watch items.
+	watching := make([]WatchItem, 0, len(parsed.Watching))
+	for _, w := range parsed.Watching {
+		if w.Prediction == "" {
+			continue
+		}
+		watching = append(watching, w)
+	}
+
 	if parsed.Vibe == "" {
 		parsed.Vibe = "STEADY"
 	}
@@ -354,20 +494,23 @@ func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User
 	}
 
 	return &SmartFeedDigest{
-		Vibe:            parsed.Vibe,
-		HeroStat:        heroStat,
-		Timeframe:       computeTimeframe(achievements),
-		Headline:        parsed.Headline,
-		Summary:         parsed.Summary,
-		Highlight:       parsed.Highlight,
-		Groups:          parsed.Groups,
-		SuggestedAction: action,
-		FeaturedPeople:  featured,
-		MyShare:         myShare,
-		FollowedShare:   followedShare,
-		ActivityByDay:   buildActivityByDay(achievements),
-		SourceCount:     len(achievements),
-		GeneratedAt:     time.Now(),
+		Vibe:                 parsed.Vibe,
+		HeroStat:             heroStat,
+		Timeframe:            computeTimeframe(achievements),
+		Headline:             parsed.Headline,
+		Summary:              parsed.Summary,
+		Highlight:            parsed.Highlight,
+		HighlightAchievement: highlightAch,
+		Groups:               groups,
+		Milestones:           milestones,
+		Watching:             watching,
+		SuggestedAction:      action,
+		FeaturedPeople:       featured,
+		MyShare:              myShare,
+		FollowedShare:        followedShare,
+		ActivityByDay:        buildActivityByDay(achievements),
+		SourceCount:          len(achievements),
+		GeneratedAt:          time.Now(),
 	}, nil
 }
 

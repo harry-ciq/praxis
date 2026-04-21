@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,11 @@ import {
   AlertCircle,
   Rss,
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  ExternalLink,
+  Target,
 } from "lucide-react";
 import { formatRelativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -34,11 +40,34 @@ type GroupTheme =
 
 type Vibe = "MOMENTUM" | "STEADY" | "EXPLORING" | "QUIET" | "MIXED";
 
+interface AchievementStub {
+  id: string;
+  title: string;
+  type: string;
+  proofUrl: string;
+  person: string;
+  username: string;
+}
+
 interface SmartFeedGroup {
   emoji: string;
   label: string;
   detail: string;
   theme: GroupTheme;
+  achievements: AchievementStub[];
+}
+
+interface Milestone {
+  emoji: string;
+  label: string;
+  current: number;
+  target: number;
+}
+
+interface WatchItem {
+  emoji: string;
+  prediction: string;
+  targetUsername: string;
 }
 
 interface SmartFeedAction {
@@ -67,7 +96,10 @@ interface SmartFeedDigest {
   headline: string;
   summary: string;
   highlight: string;
+  highlightAchievement: AchievementStub | null;
   groups: SmartFeedGroup[];
+  milestones: Milestone[];
+  watching: WatchItem[];
   suggestedAction: SmartFeedAction | null;
   featuredPeople: FeaturedPerson[];
   myShare: number;
@@ -467,8 +499,22 @@ function FullDigest({
   onRegenerate: () => void;
   isRegenerating: boolean;
 }) {
+  const router = useRouter();
   const vibe = VIBE_STYLE[digest.vibe] ?? VIBE_STYLE.STEADY;
   const action = digest.suggestedAction;
+
+  // Jump to the raw-feed tab and scroll the matching card into view.
+  const jumpToAchievement = (id: string) => {
+    const el = document.getElementById(`achievement-${id}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("smart-feed-flash");
+      setTimeout(() => el.classList.remove("smart-feed-flash"), 1400);
+      return;
+    }
+    // Card isn't in the DOM — user is on Smart tab. Flip to Raw and deep link.
+    router.push(`/feed?tab=raw&focus=${encodeURIComponent(id)}`);
+  };
 
   const generatedDate = useMemo(() => new Date(digest.generatedAt), [
     digest.generatedAt,
@@ -639,6 +685,17 @@ function FullDigest({
             <span className="mt-2 text-[10px] font-semibold uppercase tracking-[0.25em] text-amber-400/80">
               Highlight of the week
             </span>
+            {digest.highlightAchievement && (
+              <button
+                onClick={() =>
+                  jumpToAchievement(digest.highlightAchievement!.id)
+                }
+                className="mt-3 inline-flex items-center gap-1 text-[12px] font-medium text-amber-300/80 transition-colors hover:text-amber-200"
+              >
+                See the achievement
+                <ArrowRight className="size-3" />
+              </button>
+            )}
           </div>
         )}
 
@@ -676,33 +733,99 @@ function FullDigest({
         </div>
       </div>
 
-      {/* Theme chips */}
+      {/* Milestones — near-miss progress bars */}
+      {digest.milestones.length > 0 && (
+        <section className="smart-feed-fade flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/50 p-4"
+          style={{ ["--stagger" as string]: 5.5 }}
+        >
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+            <Target className="size-3 text-amber-400" />
+            Close to done
+          </div>
+          <div className="flex flex-col gap-3">
+            {digest.milestones.map((m, i) => {
+              const pct = Math.max(
+                0,
+                Math.min(100, Math.round((m.current / m.target) * 100))
+              );
+              return (
+                <div key={i} className="flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base leading-none">{m.emoji}</span>
+                      <span className="text-[13px] text-zinc-200">
+                        {m.label}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-medium tabular-nums text-zinc-400">
+                      {m.current} / {m.target}
+                    </span>
+                  </div>
+                  <div className="relative h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500/80 to-amber-400 transition-[width]"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Watching — forward-looking */}
+      {digest.watching.length > 0 && (
+        <section
+          className="smart-feed-fade flex flex-col gap-2"
+          style={{ ["--stagger" as string]: 5.75 }}
+        >
+          <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <Eye className="size-3 text-zinc-400" />
+            Watching this week
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {digest.watching.map((w, i) => {
+              const person = digest.featuredPeople.find(
+                (p) => p.username === w.targetUsername
+              );
+              return (
+                <div
+                  key={i}
+                  className="flex items-start gap-2.5 rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900/80 to-zinc-900/30 px-3 py-2.5"
+                >
+                  {person ? (
+                    <Avatar size="sm" className="size-7 shrink-0">
+                      {person.avatarUrl ? (
+                        <AvatarImage src={person.avatarUrl} alt={person.name} />
+                      ) : null}
+                      <AvatarFallback className="bg-zinc-800 text-[10px]">
+                        {getInitials(person.name)}
+                      </AvatarFallback>
+                    </Avatar>
+                  ) : (
+                    <span className="text-xl leading-none">{w.emoji}</span>
+                  )}
+                  <p className="text-[13px] leading-snug text-zinc-200">
+                    {w.prediction}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Theme chips — expandable to reveal linked achievements */}
       {digest.groups.length > 0 && (
         <div className="grid gap-2 sm:grid-cols-2">
           {digest.groups.map((g, i) => (
-            <div
+            <ExpandableChip
               key={i}
-              className={cn(
-                "smart-feed-fade flex items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors",
-                THEME_STYLE[g.theme] ?? THEME_STYLE.OTHER
-              )}
-              style={{ ["--stagger" as string]: 6 + i }}
-            >
-              <span className="text-xl leading-none">{g.emoji}</span>
-              <div className="flex min-w-0 flex-col">
-                <span
-                  className={cn(
-                    "truncate text-[10px] font-semibold uppercase tracking-wider",
-                    THEME_LABEL_STYLE[g.theme] ?? THEME_LABEL_STYLE.OTHER
-                  )}
-                >
-                  {g.label}
-                </span>
-                <span className="text-[13px] leading-snug text-zinc-200">
-                  {g.detail}
-                </span>
-              </div>
-            </div>
+              group={g}
+              stagger={6 + i}
+              onJump={jumpToAchievement}
+            />
           ))}
         </div>
       )}
@@ -714,6 +837,94 @@ function FullDigest({
           stagger={6 + digest.groups.length}
           onRegenerate={onRegenerate}
         />
+      )}
+    </div>
+  );
+}
+
+function ExpandableChip({
+  group,
+  stagger,
+  onJump,
+}: {
+  group: SmartFeedGroup;
+  stagger: number;
+  onJump: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasStubs = group.achievements.length > 0;
+
+  return (
+    <div
+      className={cn(
+        "smart-feed-fade flex flex-col rounded-xl border transition-colors",
+        THEME_STYLE[group.theme] ?? THEME_STYLE.OTHER
+      )}
+      style={{ ["--stagger" as string]: stagger }}
+    >
+      <button
+        type="button"
+        onClick={() => hasStubs && setOpen((v) => !v)}
+        disabled={!hasStubs}
+        className={cn(
+          "flex items-start gap-3 px-3 py-2.5 text-left",
+          hasStubs && "cursor-pointer"
+        )}
+        aria-expanded={open}
+      >
+        <span className="text-xl leading-none">{group.emoji}</span>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span
+            className={cn(
+              "truncate text-[10px] font-semibold uppercase tracking-wider",
+              THEME_LABEL_STYLE[group.theme] ?? THEME_LABEL_STYLE.OTHER
+            )}
+          >
+            {group.label}
+          </span>
+          <span className="text-[13px] leading-snug text-zinc-200">
+            {group.detail}
+          </span>
+        </div>
+        {hasStubs && (
+          <span className="mt-0.5 shrink-0 text-zinc-500">
+            {open ? (
+              <ChevronUp className="size-3.5" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
+          </span>
+        )}
+      </button>
+
+      {/* Expanded reveal */}
+      {open && (
+        <div className="flex flex-col gap-1 border-t border-zinc-800/60 px-3 py-2">
+          {group.achievements.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => onJump(a.id)}
+              className="group/row flex items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-zinc-800/60"
+            >
+              <span className="size-1.5 shrink-0 rounded-full bg-zinc-600 group-hover/row:bg-zinc-300" />
+              <span className="flex-1 truncate text-[12px] text-zinc-300 group-hover/row:text-zinc-100">
+                {a.title}
+              </span>
+              {a.proofUrl && (
+                <a
+                  href={a.proofUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 text-zinc-500 transition-colors hover:text-zinc-200"
+                  aria-label="Open proof link"
+                >
+                  <ExternalLink className="size-3" />
+                </a>
+              )}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

@@ -166,3 +166,14 @@
   );
   animation: smart-feed-shimmer 1.4s ease-in-out infinite;
 }
+
+/* Brief flash on a raw-feed card when the user clicks through from the
+   smart feed. Amber ring fades in then out. */
+@keyframes smart-feed-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  30%  { box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.45); }
+  100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+}
+.smart-feed-flash {
+  animation: smart-feed-flash 1.4s ease-out;
+}

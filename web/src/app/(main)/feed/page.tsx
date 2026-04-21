@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Loader2, Rss, RefreshCw, Check, Sparkles } from "lucide-react";
 import { useFeed } from "@/hooks/use-feed";
 import { AchievementCard } from "@/components/achievements/achievement-card";
@@ -57,7 +58,12 @@ function EmptyState() {
 }
 
 export default function FeedPage() {
-  const [tab, setTab] = useState<FeedTab>("smart");
+  const searchParams = useSearchParams();
+  // Open the raw tab when deep-linked via ?tab=raw (e.g. from a smart-feed
+  // "See the achievement" link). Default is smart.
+  const initialTab: FeedTab = searchParams.get("tab") === "raw" ? "raw" : "smart";
+  const [tab, setTab] = useState<FeedTab>(initialTab);
+  const focusId = searchParams.get("focus");
 
   const {
     data,
@@ -125,6 +131,31 @@ export default function FeedPage() {
 
   const achievements =
     data?.pages.flatMap((page) => page.achievements) ?? [];
+
+  // When deep-linked with ?focus=<id>, scroll to and flash that card once it mounts.
+  useEffect(() => {
+    if (!focusId || tab !== "raw") return;
+    const tryFocus = () => {
+      const el = document.getElementById(`achievement-${focusId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("smart-feed-flash");
+        setTimeout(() => el.classList.remove("smart-feed-flash"), 1400);
+        return true;
+      }
+      return false;
+    };
+    if (tryFocus()) return;
+    // Card not in DOM yet — poll briefly while the feed loads.
+    const t = setInterval(() => {
+      if (tryFocus()) clearInterval(t);
+    }, 150);
+    const stop = setTimeout(() => clearInterval(t), 4000);
+    return () => {
+      clearInterval(t);
+      clearTimeout(stop);
+    };
+  }, [focusId, tab, achievements.length]);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
@@ -196,10 +227,13 @@ export default function FeedPage() {
       ) : (
         <div className="space-y-4">
           {achievements.map((achievement) => (
-            <AchievementCard
+            <div
               key={achievement.id}
-              achievement={achievement}
-            />
+              id={`achievement-${achievement.id}`}
+              className="scroll-mt-20 rounded-2xl"
+            >
+              <AchievementCard achievement={achievement} />
+            </div>
           ))}
 
           {/* Infinite scroll sentinel */}
