@@ -109,4 +109,148 @@ Phases are shippable slices — each one adds a working feature that can be test
 
 ---
 
-Later phases (not yet planned): blockchain verification of achievements, company pages, therapist-style profile pages for mentors, reporting/analytics dashboard, mobile app.
+# V2 — Production & Growth
+
+Phases 1-14 shipped an end-to-end product. V2 turns it into something trustworthy, scalable, and commercially viable.
+
+---
+
+## Tier 1 — Trust & moat
+
+These make Praxis meaningfully different from LinkedIn. Do these first.
+
+### Phase 15 — Cryptographic verification **[NEXT]**
+Currently `verification_hash` is a nullable column; the "Verified" badge is cosmetic. Phase 15 turns it into a real cryptographic attestation.
+- Ed25519 server keypair stored in env/KMS; public key exposed at `/.well-known/praxis-pubkey.json`
+- Signed payload: `{userId, type, sourceId, occurredAt, proofUrl}` canonicalized (RFC 8785 JCS) → SHA256 → Ed25519
+- `verification_hash` and `verification_signature` columns populated at achievement-create time
+- `GET /api/v1/achievements/{id}/verify` returns the payload + signature for independent verification
+- "Verified" badge on cards links to a public verify page showing the signed payload and a "Verified ✓" result after client-side signature check
+
+### Phase 16 — More achievement providers
+Each new provider is ~1 week of work using the existing `AchievementProvider` interface.
+- **LeetCode** — problems solved, contest rating milestones
+- **Stack Overflow** — reputation milestones, top-answer tags
+- **Medium / dev.to** — published articles (title, claps/reads)
+- **npm / PyPI** — packages published, weekly download milestones
+- **Hugging Face** — models/datasets published, download counts
+
+---
+
+## Tier 2 — Deferred-from-V1 polish
+
+Items we explicitly deferred from earlier phases.
+
+### Phase 17 — Responsive + accessibility audit
+- Mobile (375w) and tablet (768w) pass on every route, prioritising chat, profile, and jobs
+- Per-route React `error.tsx` boundaries (currently only global one)
+- Keyboard navigation and focus management across modals
+- ARIA labels on icon-only buttons
+- WCAG AA colour-contrast sweep
+
+### Phase 18 — Media uploads (MinIO/S3)
+MinIO already runs in docker-compose but is unused.
+- Avatar upload on profile (currently only pulled from GitHub)
+- Image attachments in messages (schema: `message_attachments` table)
+- Achievement proof attachments (screenshots, PDFs)
+- Pre-signed URL flow: backend issues PUT URL, client uploads directly, notifies backend on success
+- Image processing worker task: thumbnail generation
+
+### Phase 19 — Transactional email
+`email:notify` task already exists but only logs.
+- Wire to Resend (or SES)
+- Templates: welcome, new-follower, job-match, weekly digest
+- Email preferences UI wired to backend flags (settings page has a placeholder)
+- Unsubscribe token + public unsubscribe endpoint
+
+### Phase 20 — Playwright e2e
+Cover the flows where Vitest falls short.
+- **Auth → provider connect → first sync → see achievements** (happy path)
+- **Send message → other user sees typing → read receipt** (two-browser test)
+- **Apply to job → match score shown → application submitted** (qualified and unqualified cases)
+- Run in CI on PR merge to main
+
+---
+
+## Tier 3 — Product surface area
+
+Make the job board side of the product real.
+
+### Phase 21 — Company pages
+- `/company/{slug}` public page with logo, bio, open jobs, verified employees
+- Employee verification: users whose email domain matches are offered a "Confirm you work at X" button
+- Company-admin role — creator of the company page becomes admin
+- Company search
+
+### Phase 22 — Hiring workflow
+- Application status lifecycle: PENDING → REVIEWED → ACCEPTED | REJECTED (schema already has this)
+- Recruiter dashboard: list applicants, filter by match score / location / availability
+- Message-the-applicant from application detail
+- Candidate-facing status tracker in `/profile` → Applications tab
+
+### Phase 23 — Analytics dashboards
+- **Personal**: achievement growth over time, profile views, match-rate across applied jobs, skill gap vs. saved jobs
+- **Company**: applicant funnel, time-to-hire, which achievement types correlate with accepted offers
+- Chart library: Recharts (lightweight, Tailwind-friendly)
+
+---
+
+## Tier 4 — Scale & operability
+
+Things you need before inviting real users.
+
+### Phase 24 — Observability
+- OpenTelemetry tracing: API → worker → DB, exported to Jaeger locally and Honeycomb/Tempo in prod
+- Structured request IDs end-to-end (already partial via chi RequestID)
+- Sentry (or equivalent) for server panics and frontend errors
+- Metrics dashboard: queue depth, ws connection count, DB pool stats, p50/p99 latency per route
+
+### Phase 25 — Performance pass
+- Audit slow queries; add indexes on `achievements.user_id`, `follows.(follower_id, following_id)`, `messages.conversation_id` if missing
+- Eliminate N+1: provider list per profile, conversation participants, reactions per achievement
+- Edge cache public profile + feed pages for anonymous viewers
+- Bundle analysis + code-split heavy pages (Recharts, WebSocket client)
+- Lighthouse pass — target 90+ on mobile
+
+### Phase 26 — Production deploy
+- Multi-stage Dockerfiles for `server` and `worker` (currently dev-only via Air)
+- Deploy target: Vercel for web, Fly.io / Render for server + worker, Neon for Postgres, Upstash for Redis
+- Secrets via platform secret store — no `.env` in the repo beyond `.example`
+- Domain + TLS + CDN
+- Runbook: how to deploy, rollback, rotate secrets, read logs
+- Staging environment
+
+---
+
+## Tier 5 — Differentiators
+
+Later-stage bets. Only after the platform has real users.
+
+### Phase 27 — Mobile app
+- Expo (React Native) reusing the existing API and types package
+- Push notifications (APNs + FCM)
+- Offline-first feed via react-query persistence
+- Deep links to achievements, profiles, jobs
+
+### Phase 28 — Mentor / advisor marketplace
+- Bookable 1:1 sessions on your profile — calendar integration (Cal.com)
+- Stripe Connect for payments (creator gets paid, platform takes fee)
+- Session reviews → become an achievement type
+
+### Phase 29 — On-chain attestation
+- Optionally mint each verified achievement as an attestation (EAS on Base — cheapest / easiest)
+- Users link a wallet in settings; minting is opt-in per achievement
+- Third parties can verify on-chain without hitting our API at all (true decentralisation story)
+- ENS support for profile URLs
+
+---
+
+# Cross-cutting backlog (not phase-scoped)
+
+Things that don't warrant their own phase but need to happen over time.
+- **Security**: CSP headers, CSRF tokens, SQLi review, secret scanning in CI
+- **i18n**: messages to a translation layer (English only today)
+- **Dark mode toggle**: hardcoded dark today; some users want a light UI
+- **Admin tooling**: user support queries, achievement moderation, connector deletion
+- **Data export**: user can download a JSON of everything about them (GDPR)
+- **Account deletion**: real tombstone flow, not just a disabled flag
