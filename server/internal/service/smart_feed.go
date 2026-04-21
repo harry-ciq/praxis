@@ -38,6 +38,7 @@ type SmartFeedDigest struct {
 // SmartFeedService computes an LLM-assisted digest of a user's feed.
 type SmartFeedService struct {
 	achievementRepo *repository.AchievementRepo
+	userRepo        *repository.UserRepo
 	llmClient       *llm.Client
 	redis           *redis.Client
 	cacheTTL        time.Duration
@@ -46,6 +47,7 @@ type SmartFeedService struct {
 
 func NewSmartFeedService(
 	achievementRepo *repository.AchievementRepo,
+	userRepo *repository.UserRepo,
 	llmClient *llm.Client,
 	rdb *redis.Client,
 	cacheTTLSeconds int,
@@ -57,6 +59,7 @@ func NewSmartFeedService(
 	}
 	return &SmartFeedService{
 		achievementRepo: achievementRepo,
+		userRepo:        userRepo,
 		llmClient:       llmClient,
 		redis:           rdb,
 		cacheTTL:        ttl,
@@ -64,9 +67,11 @@ func NewSmartFeedService(
 	}
 }
 
-// Generate returns a smart-feed digest for the user. Uses the same feed scope
-// as the raw feed (self + followed users). Redis-cached per user with
-// configurable TTL (default 15 min). If force is true, bypasses the cache.
+// Generate returns a smart-feed digest personalized for the given viewer.
+// Same feed scope as the raw feed (self + followed users), but the prompt is
+// rewritten from the viewer's POV so two users with overlapping feeds each get
+// their own first-person narrative. Redis-cached per viewer with configurable
+// TTL. If force is true, bypasses the cache.
 func (s *SmartFeedService) Generate(ctx context.Context, userID string, force bool) (*SmartFeedDigest, error) {
 	if !s.llmClient.IsConfigured() {
 		return nil, ErrSmartFeedUnavailable
@@ -81,18 +86,32 @@ func (s *SmartFeedService) Generate(ctx context.Context, userID string, force bo
 		}
 	}
 
+	viewer, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load viewer: %w", err)
+	}
+	if viewer == nil {
+		return nil, fmt.Errorf("viewer not found: %s", userID)
+	}
+
 	achievements, err := s.achievementRepo.ListFeed(ctx, userID, 50, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list feed: %w", err)
 	}
 
-	digest, err := s.generate(ctx, achievements)
+	digest, err := s.generate(ctx, viewer, achievements)
 	if err != nil {
 		return nil, err
 	}
 
 	_ = s.writeCache(ctx, cacheKey, digest)
 	return digest, nil
+}
+
+// InvalidateCache drops the cached digest for a viewer. Call this after events
+// that change what a viewer's feed should look like (follow/unfollow, new sync).
+func (s *SmartFeedService) InvalidateCache(ctx context.Context, userID string) {
+	_ = s.redis.Del(ctx, "smart-feed:"+userID).Err()
 }
 
 func (s *SmartFeedService) readCache(ctx context.Context, key string) (*SmartFeedDigest, error) {
@@ -118,28 +137,32 @@ func (s *SmartFeedService) writeCache(ctx context.Context, key string, d *SmartF
 	return s.redis.Set(ctx, key, b, s.cacheTTL).Err()
 }
 
-// smartFeedSystemPrompt is the instruction to Claude. Marked as cacheable so
-// that back-to-back calls within 5 minutes (multiple users generating digests)
-// only pay for it once.
+// smartFeedSystemPrompt is the instruction to Claude. The rules are stable
+// across users so this block is marked as cacheable (5-min ephemeral). The
+// viewer's identity is injected in the user message so it doesn't bust the
+// system-prompt cache.
 const smartFeedSystemPrompt = `You summarize a social feed of verified professional achievements on Praxis, a network where every event is real (repo creation, star milestones, YouTube videos published, subscriber milestones, commit streaks, PR merges).
 
-Given a feed of events from the user and the people they follow, produce a JSON object with exactly these fields:
+You write the summary FOR ONE SPECIFIC VIEWER. Each feed item is tagged with "isMine": when true the event is the viewer's own activity; when false it belongs to someone the viewer follows.
+
+Produce a JSON object with exactly these fields:
 
 {
-  "summary": "2-3 sentences in third person, highlighting the most interesting activity. Reference people by their name. Avoid marketing fluff. Be specific (numbers, repo names, video titles).",
+  "summary": "2-3 sentences written TO the viewer in second person. Use 'you' / 'your' for items where isMine is true. Use the other person's name (first name preferred) for items where isMine is false. Be specific: mention counts, repo names, video titles. No marketing fluff.",
   "groups": [
-    {"emoji": "🚀", "label": "Short theme", "detail": "one-line count or highlight"}
+    {"emoji": "🚀", "label": "Short theme", "detail": "one-line detail. Prefer separating 'Your …' from activity by people you follow when both exist."}
   ]
 }
 
 Rules:
 - Output ONLY the JSON object. No markdown fences, no commentary.
 - 2 to 5 groups. Each emoji/label/detail must be short (detail < 80 chars).
-- Good themes: Shipping (repos/commits), Content (videos/articles), Milestones (stars/subscribers/views), Community (PRs merged, first OSS), Learning (new skills, streaks).
+- If the viewer has their own recent activity, the first group should reflect that with "Your ..." phrasing.
+- Good themes: Shipping (repos/commits), Content (videos/articles), Milestones (stars/subscribers/views), Community (PRs merged, first OSS).
 - If the feed is empty or trivial, return a short summary saying so and an empty groups array.
 - Never invent data. Only use facts that appear in the feed items.`
 
-func (s *SmartFeedService) generate(ctx context.Context, achievements []repository.AchievementWithUser) (*SmartFeedDigest, error) {
+func (s *SmartFeedService) generate(ctx context.Context, viewer *repository.User, achievements []repository.AchievementWithUser) (*SmartFeedDigest, error) {
 	if len(achievements) == 0 {
 		return &SmartFeedDigest{
 			Summary:     "Your feed is quiet right now. Follow some builders to see their achievements here.",
@@ -154,6 +177,7 @@ func (s *SmartFeedService) generate(ctx context.Context, achievements []reposito
 		items = append(items, map[string]interface{}{
 			"person":      a.UserName,
 			"username":    a.UserUsername,
+			"isMine":      a.UserID == viewer.ID,
 			"type":        a.Type,
 			"title":       a.Title,
 			"description": a.Description,
@@ -163,7 +187,11 @@ func (s *SmartFeedService) generate(ctx context.Context, achievements []reposito
 	}
 	itemsJSON, _ := json.MarshalIndent(items, "", "  ")
 
-	userText := "Feed items (newest first):\n\n" + string(itemsJSON)
+	viewerHeader := fmt.Sprintf(
+		"Viewer: %s (@%s). Write the summary to them using 'you' for items where isMine is true.\n\nFeed items (newest first):\n\n",
+		viewer.Name, viewer.Username,
+	)
+	userText := viewerHeader + string(itemsJSON)
 
 	system := []llm.ContentBlock{llm.CacheableBlock(smartFeedSystemPrompt)}
 	userBlocks := []llm.ContentBlock{llm.TextBlock(userText)}

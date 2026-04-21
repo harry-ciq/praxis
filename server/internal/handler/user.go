@@ -17,6 +17,7 @@ import (
 type UserHandler struct {
 	userService        *service.UserService
 	achievementService *service.AchievementService
+	smartFeedService   *service.SmartFeedService
 	experienceRepo     *repository.ExperienceRepo
 	skillRepo          *repository.SkillRepo
 }
@@ -24,12 +25,14 @@ type UserHandler struct {
 func NewUserHandler(
 	userService *service.UserService,
 	achievementService *service.AchievementService,
+	smartFeedService *service.SmartFeedService,
 	experienceRepo *repository.ExperienceRepo,
 	skillRepo *repository.SkillRepo,
 ) *UserHandler {
 	return &UserHandler{
 		userService:        userService,
 		achievementService: achievementService,
+		smartFeedService:   smartFeedService,
 		experienceRepo:     experienceRepo,
 		skillRepo:          skillRepo,
 	}
@@ -152,6 +155,11 @@ func (h *UserHandler) Follow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The viewer's smart-feed digest is now stale — their follow graph changed.
+	if h.smartFeedService != nil {
+		h.smartFeedService.InvalidateCache(r.Context(), claims.UserID)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -178,6 +186,10 @@ func (h *UserHandler) Unfollow(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to unfollow user")
 		return
+	}
+
+	if h.smartFeedService != nil {
+		h.smartFeedService.InvalidateCache(r.Context(), claims.UserID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
